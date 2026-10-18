@@ -1,0 +1,22 @@
+dependencies:
+  idf: ">=5.1.0"
+
+  # LVGL + ESP port (handles tick, task, display buffer, vsync)
+  espressif/esp_lvgl_port: "^2.3.0"
+
+  # LVGL itself — pinned to 8.3.x for API stability (also brings in the
+  # bundled TJpgDec decoder used for album art, extra/libs/sjpg/tjpgd.h)
+  lvgl/lvgl: "~8.3.0"
+
+  # Panel driver for the ST77916 QSPI display believed to be on this board
+  # (same chip family used on Waveshare's ESP32-S3-Touch-LCD-1.85 series).
+  # TODO: confirm this is the correct driver chip for the exact 1.83" board —
+  # see board_config.h for the open question.
+  #
+  # Pinned to 1.0.1, not latest (2.0.2): 2.0.2 added MIPI-DSI support (ESP32-P4
+  # only, irrelevant here) behind a manifest "if" rule using "&&" syntax that
+  # PlatformIO's bundled idf-component-manager (older pyparsing-based parser)
+  # can't parse — fails during dependency resolution with a pyparsing
+  # ParseException before any of our own code is even touched. 1.0.1 covers
+  # plain SPI/QSPI (what we need) without that newer manifest syntax.
+  espressif/esp_lcd_st77916: "~1.0.1"

@@ -1,0 +1,11 @@
+.pio/
+build/
+sdkconfig
+sdkconfig.old
+sdkconfig.*
+!sdkconfig.defaults
+managed_components/
+dependencies.lock
+
+# build-time secrets — don't commit your real WiFi credentials
+src/wifi_creds.h

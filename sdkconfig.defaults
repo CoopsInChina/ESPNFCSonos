@@ -1,0 +1,75 @@
+# ESP32-S3R8 module: 16MB flash, 8MB Octal PSRAM.
+# Verified-working block, carried over as-is from the sibling Grill & Groove
+# project (/Users/ESP32MusicAndMeat) which runs the same ESP32-S3R8 chip.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_BOOT_INIT=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=n
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+
+# LVGL fonts actually used by this project's UI (ui_boot.c, main.c)
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
+
+# Spinner widget — used as the "whirlygig" loading indicator while new
+# album art is downloading after a good NFC tap (main.c).
+CONFIG_LV_USE_SPINNER=y
+
+# Must match album_art.c's RGB565 buffers (uint16_t pixels).
+CONFIG_LV_COLOR_DEPTH_16=y
+
+# RGB565 byte order between LVGL's buffer and the QSPI panel.
+CONFIG_LV_COLOR_16_SWAP=y
+
+# TJpgDec (tjpgd.h) — the JPEG decoder album_art.c uses lives inside this
+# LVGL module; without it the header's declarations compile out entirely.
+CONFIG_LV_USE_SJPG=y
+
+# ESP-IDF's default "main" task stack (3584 B) isn't enough for our boot
+# sequence (WiFi init, display/LVGL bring-up, SSDP discovery's 1KB+ stack
+# buffers) — it stack-overflowed partway through esp_wifi_init() on first
+# boot. Same value the sibling Grill & Groove project uses.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# Mozilla CA bundle, for esp_crt_bundle_attach() — album art is fetched
+# over HTTPS from CDNs (e.g. Spotify's), see album_art.c.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+
+# Measured directly: curl from a Mac on the same WiFi gets these exact
+# Spotify CDN files in 2-3s / 35-100 KB/s; the ESP32 took 9-51s or failed
+# outright, ruling out the network/CDN entirely. Default mbedTLS config
+# allocates every TLS connection's buffers (16KB in + 4KB out) from
+# internal DRAM — the same scarce pool WiFi's own DMA buffers need, and a
+# well-documented ESP32 contention point under concurrent network load.
+# Switched from EXTERNAL_MEM_ALLOC to DEFAULT_MEM_ALLOC: the sibling
+# Grill & Groove project (same ESP32-S3R8 chip, same ESP-IDF 5.3.1) uses
+# DEFAULT, not EXTERNAL — forcing *everything* mbedTLS touches into PSRAM
+# (EXTERNAL) adds real latency to the many small/frequent allocations
+# crypto makes internally; DEFAULT lets ESP-IDF's normal allocator send
+# only the large I/O buffers to PSRAM while small hot-path ones stay in
+# fast internal SRAM. Confirmed via their own comment: this is what fixed
+# MBEDTLS_ERR_SSL_ALLOC_FAILED for them without the EXTERNAL-mode downside.
+CONFIG_MBEDTLS_DEFAULT_MEM_ALLOC=y
+
+# Matches the sibling project's socket headroom.
+CONFIG_LWIP_MAX_SOCKETS=14
+
+# Tried bumping TCP receive window (65535, then a more conservative
+# 16384) to fix slow album art downloads — BOTH made things worse, not
+# better. That rules out TCP window size as the bottleneck entirely
+# (not just "needed tuning") — reverted to the ESP-IDF default (5760).
+
+# Per-chunk timing logs show data arriving in instant ~16KB bursts
+# separated by multi-second gaps that roughly double each time (1s, 2s,
+# 3s, 4s, 6s, 8s, 12s...) — the textbook signature of TCP retransmission
+# timeout backoff after packet loss, not a throughput ceiling. Enabling
+# LWIP's own TCP stats (rexmit/drop counters) to confirm with hard
+# numbers instead of inferring from timing alone — see album_art.c.
+CONFIG_LWIP_STATS=y

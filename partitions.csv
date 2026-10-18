@@ -1,0 +1,10 @@
+# Partition table for the 16MB flash ESP32-S3R8 module. The build was
+# overflowing ESP-IDF's default ~1MB app partition (sized for small flash
+# chips, not auto-scaled to the 16MB actually on this board) — this gives
+# the single factory app plenty of room. No OTA/SPIFFS needed for this
+# project (unlike the sibling Grill & Groove project's partitions.csv).
+#
+# Name,     Type, SubType,  Offset,   Size
+nvs,        data, nvs,      0x9000,   0x6000
+phy_init,   data, phy,      0xf000,   0x1000
+factory,    app,  factory,  0x10000,  0x300000
