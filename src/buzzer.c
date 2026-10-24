@@ -41,6 +41,12 @@ static void buzzer_task(void *arg)
             write_tone(BEEP_DURATION_MS);
             if (i + 1 < count) vTaskDelay(pdMS_TO_TICKS(BEEP_GAP_MS));
         }
+        // i2s_write() only loads the DMA ring buffer — once the tone's last
+        // frames are written, the DMA keeps looping that same last buffer
+        // (there's no "end of stream" in I2S) rather than going quiet,
+        // which is why the tone was holding on indefinitely. Overwrite the
+        // buffer with silence once the beep sequence is done.
+        i2s_zero_dma_buffer(I2S_PORT);
     }
 }
 

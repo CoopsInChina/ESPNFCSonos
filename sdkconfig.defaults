@@ -1,3 +1,17 @@
+# GPIO43/44 (this NFC module's UART pins, see board_config.h) are the
+# ESP32-S3's own hardwired U0TXD/U0RXD — i.e. UART0, the default app
+# console. With the default console config, the ESP32 continuously drives
+# its own log output onto GPIO43, straight into the NFC module's RX pin,
+# while also fighting it for GPIO44 — a standing conflict that would
+# explain the module staying totally silent regardless of baud/voltage.
+# The platformio monitor keeps working unaffected: it reads the *secondary*
+# console channel (USB_SERIAL_JTAG, separate physical pins from UART0's),
+# which is what /dev/cu.usbmodem101 actually is. This frees GPIO43/44 for
+# exclusive NFC use (aside from the chip's own unavoidable, one-time,
+# sub-second ROM boot-log burst on every power-on/reset, which isn't
+# config-controlled at all).
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
 # ESP32-S3R8 module: 16MB flash, 8MB Octal PSRAM.
 # Verified-working block, carried over as-is from the sibling Grill & Groove
 # project (/Users/ESP32MusicAndMeat) which runs the same ESP32-S3R8 chip.

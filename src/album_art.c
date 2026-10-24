@@ -37,6 +37,7 @@ static uint16_t    *s_disp_buf = NULL;
 static uint16_t    *s_work_buf = NULL;
 static lv_img_dsc_t s_art_dsc;
 static volatile bool s_new_art = false;
+static volatile bool s_loading = false;
 
 static SemaphoreHandle_t s_url_mutex = NULL;
 static EXT_RAM_BSS_ATTR char s_pending[512] = {0};
@@ -165,6 +166,18 @@ static void prepare_url(const char *raw, char *out, size_t sz)
         snprintf(suffix, sizeof(suffix), "&maxWidth=%d&maxHeight=%d", ART_W, ART_H);
         if (cur + strlen(suffix) < sz) strncat(out, suffix, sz - cur - 1);
     }
+
+    // Spotify CDN direct link (Sonos hands these out as-is for Spotify
+    // tracks — no /getaa proxy involved, so the maxWidth/maxHeight trick
+    // above never applies). Spotify's image ID encodes a fixed size as a
+    // constant 8-hex-char segment right after the "ab67616d" prefix —
+    // swapping it for another of the CDN's own fixed sizes gets a real,
+    // much smaller image instead of downloading 640x640 and scaling it
+    // down ourselves. 300x300 is the closest fixed size above our
+    // DISPLAY_WIDTH/HEIGHT (360x360); the only other option is 64x64,
+    // too small to upscale cleanly.
+    char *size_code = strstr(out, "ab67616d0000b273");
+    if (size_code) memcpy(size_code + 8, "00001e02", 8);
 }
 
 typedef struct { uint8_t *buf; size_t max; size_t total; bool overflowed; int64_t t0; } dl_ctx_t;
@@ -258,6 +271,7 @@ static void art_task(void *arg)
         if (has_work) {
             prepare_url(s_pending, url, sizeof(url));
             strncpy(s_current, s_pending, sizeof(s_current) - 1);
+            s_loading = true;
         }
         xSemaphoreGive(s_url_mutex);
 
@@ -343,7 +357,13 @@ bool album_art_update(lv_obj_t *img_obj)
 {
     if (!s_new_art || !img_obj) return false;
     s_new_art = false;
+    s_loading = false;
     s_art_dsc.data = (const uint8_t *)s_disp_buf;
     lv_img_set_src(img_obj, &s_art_dsc);
     return true;
+}
+
+bool album_art_is_loading(void)
+{
+    return s_loading;
 }

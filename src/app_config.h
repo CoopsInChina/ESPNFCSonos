@@ -49,6 +49,10 @@
 #define ART_TASK_STACK          8192
 
 // ---- NFC (RC522, UART bridge module) ----
+// Confirmed from the manufacturer's own listing for this exact board
+// (same layout, "TestPoint" label, 27.120 crystal): interface is UART
+// TTL, fixed baud 115200 — a bridging-MCU product with its own protocol,
+// not the bare MFRC522 chip's native 9600-default register interface.
 #define NFC_UART_BAUD        115200
 #define NFC_POLL_INTERVAL_MS 300
 

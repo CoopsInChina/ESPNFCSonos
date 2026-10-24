@@ -13,18 +13,16 @@
 // "spotify:track:<id>". That full string IS the uri handed to
 // sonos_play_spotify_uri().
 //
-// ==================== OPEN QUESTION — READ ME =========================
-// The RC522 module on hand is a UART-BRIDGE variant (a plain MFRC522 +
-// its own onboard MCU exposing UART instead of SPI), not the PN532 the
-// Sonos Controller project used. We do NOT yet know this exact module's
-// wire protocol (what bytes it sends when a card taps, whether it
-// auto-reports the UID/NDEF payload or needs a request command first).
-// nfc_reader_poll() below has the UART plumbing wired up (correct baud
-// rate, correct pins per board_config.h) but parse_frame() is a stub —
-// next step is capturing real bytes off the module with a tap (e.g. a
-// throwaway sketch that just logs every byte received) and filling in
-// the actual framing here.
-// ========================================================================
+// Protocol: host-driven command/response, framed as
+// 0x7F [cmd] [data...] 0xF7 (0x55 tail on error) — confirmed against a
+// working reference library for this exact module
+// (github.com/TCL47-GITHUB/RC522_UART). Not auto-reporting: every read is
+// us sending REQUEST then ANTICOLL. See nfc_reader.c.
+//
+// STILL TODO: nfc_reader_poll() currently confirms real taps (logs the
+// UID) but doesn't yet pull the NDEF "service:type:id" text out of the
+// card — that needs SELECT + AUTH + READ on the right data block, so
+// every real tap currently reports NFC_TAP_BAD rather than GOOD.
 
 typedef enum {
     NFC_TAP_NONE,   // nothing new

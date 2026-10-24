@@ -1,11 +1,13 @@
 /**
  * Album & NFC Sonos controller — boot sequence and main NFC-tap loop.
  *
- * Flow: boot -> WiFi (hardcoded creds) -> boot screen shows a WiFi glyph
- * -> find a Sonos speaker -> switch to a fullscreen "now playing" screen
- * that always shows the current album art. An NFC tap plays a track via
- * Spotify on that speaker; a good tap gets one beep + a spinner while the
- * new art loads, a bad tap (tag present, undecodable) gets two beeps.
+ * Flow: boot -> WiFi glyph while connecting -> "No WiFi. Check Settings" if
+ * that fails, else -> "No Speaker Found" if discovery fails, else ->
+ * "Speaker Connected! <name>" briefly -> fullscreen "now playing" screen
+ * that always shows the current album art (a spinner covers it whenever
+ * new art is loading). An NFC tap plays a track via Spotify on that
+ * speaker; a good tap gets one beep + the spinner while the new art loads,
+ * a bad tap (tag present, undecodable) gets two beeps.
  */
 
 #include "app_config.h"
@@ -25,17 +27,22 @@
 #include "lvgl.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <stdio.h>
 #include <string.h>
 
 static const char *TAG = "main";
 
+static lv_obj_t *s_now_playing_scr;
 static lv_obj_t *s_art_img;
 static lv_obj_t *s_spinner;
 
 static void nfc_loop_task(void *arg);
 static void boot_task(void *arg);
 
-static void now_playing_show(void)
+// Builds the "now playing" screen's objects but doesn't switch to it yet —
+// nfc_loop_task touches s_art_img/s_spinner on every iteration regardless
+// of whether a speaker has been found, so they must exist before it starts.
+static void now_playing_create(void)
 {
     lv_obj_t *scr = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
@@ -44,13 +51,20 @@ static void now_playing_show(void)
     s_art_img = lv_img_create(scr);
     lv_obj_set_size(s_art_img, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     lv_obj_center(s_art_img);
+    lv_obj_add_flag(s_art_img, LV_OBJ_FLAG_HIDDEN);   // hidden until the first art actually arrives
 
     s_spinner = lv_spinner_create(scr, 1000, 90);
     lv_obj_set_size(s_spinner, 64, 64);
     lv_obj_center(s_spinner);
-    lv_obj_add_flag(s_spinner, LV_OBJ_FLAG_HIDDEN);
+    // visible by default — a loading whirlygig beats a blank screen
 
-    lv_scr_load(scr);
+    s_now_playing_scr = scr;
+}
+
+// Fade from whatever boot/status screen is up into the now-playing screen.
+static void now_playing_activate(void)
+{
+    lv_scr_load_anim(s_now_playing_scr, LV_SCR_LOAD_ANIM_FADE_IN, 400, 0, false);
 }
 
 void app_main(void)
@@ -119,18 +133,42 @@ static void boot_task(void *arg)
     buzzer_init();
 
     if (display_lock(1000)) {
-        now_playing_show();
+        now_playing_create();
         display_unlock();
     }
 
-    if (sonos_ok) sonos_controller_start_polling();
+    // Started unconditionally — proving buzzer/NFC comms doesn't depend on
+    // a speaker being found, and this is also what polls Sonos state once
+    // one is.
+    xTaskCreate(nfc_loop_task, "nfc_loop", 8192, NULL, 4, NULL);
+
+    if (!wifi_ok) {
+        if (display_lock(1000)) {
+            ui_boot_show_message("No WiFi.\nCheck Settings");
+            display_unlock();
+        }
+    } else if (!sonos_ok) {
+        if (display_lock(1000)) {
+            ui_boot_show_message("No Speaker Found");
+            display_unlock();
+        }
+    } else {
+        char msg[160];
+        snprintf(msg, sizeof(msg), "Speaker Connected!\n%s", sonos_active_speaker_name());
+        if (display_lock(1000)) {
+            ui_boot_show_message(msg);
+            display_unlock();
+        }
+        vTaskDelay(pdMS_TO_TICKS(2500));   // let the user read it before cutting to album art
+
+        if (display_lock(1000)) {
+            now_playing_activate();
+            display_unlock();
+        }
+        sonos_controller_start_polling();
+    }
 
     ESP_LOGI(TAG, "Album & NFC Sonos controller v%s running", FIRMWARE_VERSION);
-
-    // The tap loop below runs forever with several hundred bytes of its own
-    // stack-local buffers each iteration — give it a dedicated task/stack
-    // of its own rather than keep running on this one.
-    xTaskCreate(nfc_loop_task, "nfc_loop", 8192, NULL, 4, NULL);
 
     vTaskDelete(NULL);   // boot_task's job is done — a FreeRTOS task must never just return
 }
@@ -146,6 +184,7 @@ static void nfc_loop_task(void *arg)
         if (tap == NFC_TAP_GOOD) {
             buzzer_beep(1);
             if (display_lock(200)) {
+                lv_obj_add_flag(s_art_img, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_clear_flag(s_spinner, LV_OBJ_FLAG_HIDDEN);
                 display_unlock();
             }
@@ -162,9 +201,17 @@ static void nfc_loop_task(void *arg)
             album_art_request(last_art_url);
         }
 
+        // Whirlygig instead of a blank screen or stale art while new art
+        // is in flight, whatever triggered the request.
         if (display_lock(50)) {
-            if (album_art_update(s_art_img))
+            if (album_art_is_loading()) {
+                lv_obj_add_flag(s_art_img, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_clear_flag(s_spinner, LV_OBJ_FLAG_HIDDEN);
+            }
+            if (album_art_update(s_art_img)) {
+                lv_obj_clear_flag(s_art_img, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_add_flag(s_spinner, LV_OBJ_FLAG_HIDDEN);
+            }
             display_unlock();
         }
 
