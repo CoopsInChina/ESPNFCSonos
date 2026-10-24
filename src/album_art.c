@@ -159,17 +159,20 @@ static void prepare_url(const char *raw, char *out, size_t sz)
     if (!strncmp(out, "https://", 8) && strstr(out, ":1400/"))
         memmove(out + 4, out + 5, strlen(out + 5) + 1);
 
-    // Sonos getaa: request art pre-sized to the display, far less data than full-res.
-    if (strstr(out, "/getaa?") && !strstr(out, "maxWidth")) {
-        size_t cur = strlen(out);
-        char suffix[40];
-        snprintf(suffix, sizeof(suffix), "&maxWidth=%d&maxHeight=%d", ART_W, ART_H);
-        if (cur + strlen(suffix) < sz) strncat(out, suffix, sz - cur - 1);
-    }
+    // NOTE: Sonos's /getaa proxy (used when the speaker hands us an
+    // "x-sonos-spotify:track:..." reference instead of a direct CDN URL)
+    // was tried with &maxWidth=/&maxHeight=, &w=/&h=, and &size= query
+    // params — confirmed by direct testing against a real speaker that
+    // all of them are silently ignored for Spotify-track content: same
+    // 640x640, byte-identical response every time. Sonos resolves that
+    // internal reference to real art itself, server-side, with no
+    // externally-reachable URL exposed for us to redirect to directly —
+    // this one genuinely can't be fixed from our side, only scaled down
+    // after downloading (see scale_nearest() in art_task()).
 
     // Spotify CDN direct link (Sonos hands these out as-is for Spotify
-    // tracks — no /getaa proxy involved, so the maxWidth/maxHeight trick
-    // above never applies). Spotify's image ID encodes a fixed size as a
+    // tracks — no /getaa proxy involved, so the limitation above doesn't
+    // apply). Spotify's image ID encodes a fixed size as a
     // constant 8-hex-char segment right after the "ab67616d" prefix —
     // swapping it for another of the CDN's own fixed sizes gets a real,
     // much smaller image instead of downloading 640x640 and scaling it
@@ -311,6 +314,14 @@ static void art_task(void *arg)
 
         uint16_t *tmp = s_disp_buf; s_disp_buf = s_work_buf; s_work_buf = tmp;
         s_new_art = true;
+        // "Loading" ends here — the moment real data is ready in
+        // s_disp_buf — not whenever the UI next happens to call
+        // album_art_update(). Those can be arbitrarily far apart (e.g.
+        // the UI only applies art while actively showing it, not while
+        // paused/prefetching), and is_loading() being gated on
+        // consumption created a deadlock: nothing reaches the mode that
+        // calls album_art_update() until is_loading() goes false.
+        s_loading = false;
         uint32_t t0 = xTaskGetTickCount();
         while (s_new_art && (xTaskGetTickCount() - t0) < pdMS_TO_TICKS(ART_CONSUMED_TIMEOUT_MS))
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -366,4 +377,10 @@ bool album_art_update(lv_obj_t *img_obj)
 bool album_art_is_loading(void)
 {
     return s_loading;
+}
+
+void album_art_reapply(lv_obj_t *img_obj)
+{
+    if (!img_obj) return;
+    lv_img_set_src(img_obj, &s_art_dsc);
 }

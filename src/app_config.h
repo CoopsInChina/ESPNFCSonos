@@ -8,7 +8,7 @@
 // ============================================================
 
 #ifndef FIRMWARE_VERSION
-#define FIRMWARE_VERSION "0.1.0"
+#define FIRMWARE_VERSION "1.0"
 #endif
 
 // ---- Display ----
@@ -28,6 +28,13 @@
 #define SONOS_DISCOVERY_TIMEOUT_MS  8000
 #define SONOS_POLL_INTERVAL_MS      2000
 #define SONOS_MAX_SPEAKERS          16
+
+// How long a good NFC tap forces the loading screen, in case actual
+// playback starting (and the track/art info catching up) lags behind the
+// tap itself — SONOS_POLL_INTERVAL_MS alone means that can take a couple
+// of seconds. Falls back to the normal Ready/Art state once this expires
+// if nothing ever actually started playing.
+#define TAP_LOADING_TIMEOUT_MS      20000
 
 // Spotify service parameters for direct (server-free) playback, same
 // scheme as Grill & Groove's sonos_controller.c: sid = Spotify service id

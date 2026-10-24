@@ -182,7 +182,11 @@ static int send_soap(const char *service, const char *action,
     esp_http_client_config_t cfg = {
         .url           = url,
         .method        = HTTP_METHOD_POST,
-        .timeout_ms    = 3000,
+        // Queue-mutating calls (RemoveAllTracksFromQueue/AddURIToQueue) can
+        // be slow to answer while Sonos is mid-stream on whatever's
+        // already playing — 3000ms was observed timing one of these out
+        // on a real device during active playback.
+        .timeout_ms    = 6000,
         .event_handler = http_event_handler,
         .user_data     = &ctx,
     };
@@ -354,6 +358,31 @@ bool sonos_controller_discover(uint32_t timeout_ms)
 
 // ---- Track polling ------------------------------------------------------
 
+// Separate, small SOAP call from update_track_info() below — GetPositionInfo
+// doesn't report play/pause/stop state, only GetTransportInfo does.
+static void update_transport_state(void)
+{
+    char resp[512];
+    int code = send_soap("AVTransport", "GetTransportInfo",
+                          "<InstanceID>0</InstanceID>", resp, sizeof(resp));
+    if (code != 200) {
+        ESP_LOGW(TAG, "GetTransportInfo failed, SOAP code %d", code);
+        return;
+    }
+
+    char state[32] = {0};
+    bool got = extract_xml(resp, "CurrentTransportState", state, sizeof(state));
+    bool playing = (strcmp(state, "PLAYING") == 0);
+    ESP_LOGI(TAG, "transport state: %s (extracted=%d) -> is_playing=%d",
+             got ? state : "<not found>", got, playing);
+
+    if (xSemaphoreTake(s_track_mutex, pdMS_TO_TICKS(50))) {
+        s_track.is_playing = playing;
+        strncpy(s_track.transport_state, state, sizeof(s_track.transport_state) - 1);
+        xSemaphoreGive(s_track_mutex);
+    }
+}
+
 static void update_track_info(void)
 {
     static EXT_RAM_BSS_ATTR char resp[SOAP_RESP_BUF_SZ];
@@ -401,7 +430,10 @@ static void poll_task(void *arg)
 {
     vTaskDelay(pdMS_TO_TICKS(2000));
     for (;;) {
-        if (s_active_idx >= 0) update_track_info();
+        if (s_active_idx >= 0) {
+            update_track_info();
+            update_transport_state();
+        }
         vTaskDelay(pdMS_TO_TICKS(SONOS_POLL_INTERVAL_MS));
     }
 }
@@ -450,6 +482,23 @@ static bool build_spotify_uri_meta(const char *cmd, char *uri, size_t uri_sz,
     return true;
 }
 
+// AddURIToQueue returning 200 only means Sonos accepted the request, not
+// that the container actually resolved into playable tracks — confirmed
+// directly against a real speaker that this can report success while
+// leaving the queue genuinely empty (NrTracks=0), which then makes the
+// following Seek/Play fail outright (SOAP 500s) rather than ever
+// settling into a container-resolution-failed state we could detect
+// another way.
+static int get_queue_track_count(void)
+{
+    char resp[768];
+    if (send_soap("AVTransport", "GetMediaInfo", "<InstanceID>0</InstanceID>", resp, sizeof(resp)) != 200)
+        return -1;
+    char n[16] = {0};
+    if (!extract_xml(resp, "NrTracks", n, sizeof(n))) return -1;
+    return atoi(n);
+}
+
 static bool play_spotify_direct(const char *spotify_uri)
 {
     if (s_active_idx < 0) return false;
@@ -461,8 +510,10 @@ static bool play_spotify_direct(const char *spotify_uri)
         return false;
 
     static EXT_RAM_BSS_ATTR char uri_enc[512], meta_enc[1536], args[3072], resp[512];
+    int code;
 
-    send_soap("AVTransport", "RemoveAllTracksFromQueue", "<InstanceID>0</InstanceID>", resp, sizeof(resp));
+    code = send_soap("AVTransport", "RemoveAllTracksFromQueue", "<InstanceID>0</InstanceID>", resp, sizeof(resp));
+    if (code != 200) ESP_LOGW(TAG, "RemoveAllTracksFromQueue failed: %d", code);
 
     xml_encode(uri,  uri_enc,  sizeof(uri_enc));
     xml_encode(meta, meta_enc, sizeof(meta_enc));
@@ -471,20 +522,60 @@ static bool play_spotify_direct(const char *spotify_uri)
         "<EnqueuedURIMetaData>%s</EnqueuedURIMetaData>"
         "<DesiredFirstTrackNumberEnqueued>0</DesiredFirstTrackNumberEnqueued>"
         "<EnqueueAsNext>0</EnqueueAsNext>", uri_enc, meta_enc);
-    if (send_soap("AVTransport", "AddURIToQueue", args, resp, sizeof(resp)) != 200)
-        return false;
+    code = send_soap("AVTransport", "AddURIToQueue", args, resp, sizeof(resp));
+    if (code != 200) {
+        // Seen timing out on a real device specifically while Sonos was
+        // already mid-stream on another track — one retry rather than
+        // giving up on a likely-transient congestion blip.
+        ESP_LOGW(TAG, "AddURIToQueue failed: %d, retrying once", code);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        code = send_soap("AVTransport", "AddURIToQueue", args, resp, sizeof(resp));
+        if (code != 200) {
+            ESP_LOGW(TAG, "AddURIToQueue retry failed: %d", code);
+            return false;
+        }
+    }
+
+    // A container URI (album/playlist) still has to resolve into
+    // individual tracks by Sonos fetching the container's contents from
+    // Spotify's own catalog over the internet, which does not happen
+    // synchronously within the AddURIToQueue call above. Seeking/playing
+    // immediately, before that settles, was reliably getting the speaker
+    // stuck in TRANSITIONING forever (confirmed directly against the
+    // speaker over its own API), needing a full speaker reset to clear.
+    // Give it a moment, then actually verify the queue populated rather
+    // than trusting AddURIToQueue's 200 alone — also confirmed directly
+    // that it can report success while leaving the queue empty.
+    vTaskDelay(pdMS_TO_TICKS(800));
+    int tracks = get_queue_track_count();
+    if (tracks <= 0) {
+        ESP_LOGW(TAG, "queue empty after AddURIToQueue (NrTracks=%d), retrying", tracks);
+        code = send_soap("AVTransport", "AddURIToQueue", args, resp, sizeof(resp));
+        if (code != 200) ESP_LOGW(TAG, "AddURIToQueue retry failed: %d", code);
+        vTaskDelay(pdMS_TO_TICKS(1200));
+        tracks = get_queue_track_count();
+        if (tracks <= 0) {
+            ESP_LOGW(TAG, "queue still empty (NrTracks=%d) after retry, giving up", tracks);
+            return false;
+        }
+    }
 
     snprintf(args, sizeof(args),
         "<InstanceID>0</InstanceID>"
         "<CurrentURI>x-rincon-queue:%s#0</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>", uuid);
-    send_soap("AVTransport", "SetAVTransportURI", args, resp, sizeof(resp));
+    code = send_soap("AVTransport", "SetAVTransportURI", args, resp, sizeof(resp));
+    if (code != 200) {
+        ESP_LOGW(TAG, "SetAVTransportURI failed: %d", code);
+        return false;
+    }
 
     // Freshly-swapped queue sits before track 1 — Seek is required or Play is a no-op.
-    send_soap("AVTransport", "Seek", "<InstanceID>0</InstanceID><Unit>TRACK_NR</Unit><Target>1</Target>", resp, sizeof(resp));
+    code = send_soap("AVTransport", "Seek", "<InstanceID>0</InstanceID><Unit>TRACK_NR</Unit><Target>1</Target>", resp, sizeof(resp));
+    if (code != 200) ESP_LOGW(TAG, "Seek failed: %d", code);
 
     int play_code = send_soap("AVTransport", "Play", "<InstanceID>0</InstanceID><Speed>1</Speed>", resp, sizeof(resp));
     ESP_LOGI(TAG, "Play spotify uri direct: %s (play=%d) %s", spotify_uri, play_code, uri);
-    return true;
+    return play_code == 200;
 }
 
 static void cmd_task(void *arg)

@@ -6,6 +6,7 @@ sdkconfig.*
 !sdkconfig.defaults
 managed_components/
 dependencies.lock
+.DS_Store
 
 # build-time secrets — don't commit your real WiFi credentials
 src/wifi_creds.h

@@ -18,7 +18,13 @@ typedef struct {
     char artist[128];
     char album[128];
     char album_art_url[512];
-    bool valid;   // true once first poll succeeds
+    bool valid;        // true once first poll succeeds
+    bool is_playing;   // from AVTransport's GetTransportInfo (CurrentTransportState == PLAYING)
+    // Raw CurrentTransportState (e.g. "PLAYING", "TRANSITIONING",
+    // "PAUSED_PLAYBACK", "STOPPED") — lets callers tell "still working on
+    // it" (TRANSITIONING) apart from "settled, not going to play"
+    // (anything else non-playing).
+    char transport_state[32];
 } sonos_track_t;
 
 // Initialise internal state. Call once at boot, before discovery.

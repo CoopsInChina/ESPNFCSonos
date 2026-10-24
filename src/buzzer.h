@@ -11,6 +11,10 @@ void buzzer_init(void);
 // Plays `count` short square-wave beeps (BEEP_FREQ_HZ/BEEP_DURATION_MS from
 // app_config.h), with BEEP_GAP_MS between them. Runs on its own task —
 // returns immediately, does not block the caller.
-//   count=1 -> good tap
 //   count=2 -> bad tap
 void buzzer_beep(int count);
+
+// Plays the embedded NFC-tap sound (Assets/ui/nfc_tap.wav) in place of a
+// synthesized beep for a good tap. Same queued/non-blocking behavior as
+// buzzer_beep().
+void buzzer_play_tap_sound(void);

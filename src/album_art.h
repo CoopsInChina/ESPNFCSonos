@@ -25,3 +25,10 @@ bool album_art_update(lv_obj_t *img_obj);
 // the request is abandoned by a newer one) — lets the UI show a spinner
 // instead of a blank screen or the previous track's art while it waits.
 bool album_art_is_loading(void);
+
+// Re-applies the last successfully decoded art to img_obj unconditionally
+// (unlike album_art_update(), doesn't require a "new" image to be
+// pending) — for when the UI switches back to the art view (e.g.
+// playback resumed) and the widget's source needs restoring even though
+// nothing new has downloaded.
+void album_art_reapply(lv_obj_t *img_obj);
