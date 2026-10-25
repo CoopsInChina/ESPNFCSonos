@@ -49,3 +49,11 @@ bool        sonos_is_connected(void);
 // the SOAP sequence onto the internal command task. Returns false if the
 // uri isn't a recognised Spotify uri or no speaker is selected.
 bool sonos_play_spotify_uri(const char *uri);
+
+// True while a tap-triggered play is being set up on the speaker (queue
+// clear/populate + verification). The opportunistic album art prefetch
+// should hold off while this is true — its download holds the shared
+// network mutex for several seconds and otherwise starves the
+// verification SOAP calls above, which previously caused successful taps
+// to be misreported as failed.
+bool sonos_is_cmd_pending(void);

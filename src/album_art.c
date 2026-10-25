@@ -300,27 +300,41 @@ static void art_task(void *arg)
             xSemaphoreTake(s_url_mutex, portMAX_DELAY);
             s_current[0] = '\0';
             xSemaphoreGive(s_url_mutex);
+            s_loading = false;   // give up on this one — don't leave is_loading() stuck true forever
             vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
         }
 
         int iw = 0, ih = 0;
         lv_color_t *decoded = decode_jpeg(dl_buf, dl_len, &iw, &ih);
-        if (!decoded) continue;
+        if (!decoded) { s_loading = false; continue; }
 
         scale_nearest((const uint16_t *)decoded, iw, ih, iw, s_work_buf, ART_W, ART_H);
         heap_caps_free(decoded);
         ESP_LOGI(TAG, "scaled %dx%d -> %dx%d", iw, ih, ART_W, ART_H);
 
         uint16_t *tmp = s_disp_buf; s_disp_buf = s_work_buf; s_work_buf = tmp;
+        // Point s_art_dsc at the fresh buffer immediately, not whenever the
+        // UI next happens to call album_art_update() — that can be
+        // arbitrarily far in the future (e.g. prefetching while paused), and
+        // the wait loop below only bounds it to ART_CONSUMED_TIMEOUT_MS. If
+        // that timeout elapsed before the UI ever entered Art mode (e.g. a
+        // track queued then tapped again before it was ever shown), the old
+        // code left s_art_dsc.data permanently pointing at whatever this
+        // buffer held *before* this decode — the pristine all-zero buffer
+        // on the very first decode of a boot — producing a black screen the
+        // first time Art mode was finally reached, with no later decode
+        // able to fix it since album_art_update() only updates the pointer
+        // when it also finds s_new_art true.
+        s_art_dsc.data = (const uint8_t *)s_disp_buf;
         s_new_art = true;
-        // "Loading" ends here — the moment real data is ready in
-        // s_disp_buf — not whenever the UI next happens to call
-        // album_art_update(). Those can be arbitrarily far apart (e.g.
-        // the UI only applies art while actively showing it, not while
-        // paused/prefetching), and is_loading() being gated on
-        // consumption created a deadlock: nothing reaches the mode that
-        // calls album_art_update() until is_loading() goes false.
+        // "Loading" ends here — the moment real data is ready — not
+        // whenever the UI next happens to call album_art_update(). Those can
+        // be arbitrarily far apart (e.g. the UI only applies art while
+        // actively showing it, not while paused/prefetching), and
+        // is_loading() being gated on consumption created a deadlock:
+        // nothing reaches the mode that calls album_art_update() until
+        // is_loading() goes false.
         s_loading = false;
         uint32_t t0 = xTaskGetTickCount();
         while (s_new_art && (xTaskGetTickCount() - t0) < pdMS_TO_TICKS(ART_CONSUMED_TIMEOUT_MS))
@@ -359,8 +373,23 @@ void album_art_request(const char *raw_url)
 {
     if (!s_url_mutex) return;
     xSemaphoreTake(s_url_mutex, portMAX_DELAY);
-    if (raw_url && raw_url[0]) strncpy(s_pending, raw_url, sizeof(s_pending) - 1);
-    else s_pending[0] = '\0';
+    if (raw_url && raw_url[0]) {
+        strncpy(s_pending, raw_url, sizeof(s_pending) - 1);
+        s_pending[sizeof(s_pending) - 1] = '\0';
+        // Flip s_loading the instant a genuinely new request is accepted,
+        // not whenever art_task's own polling loop next happens to notice
+        // s_pending changed (up to 300ms later, and after the caller's own
+        // code has already moved on) — honours this function's documented
+        // contract ("true from the moment a request is accepted") and
+        // closes a race where is_playing flipped true (from the unrelated
+        // poll_task) before art_task had picked up the new URL, letting
+        // the UI treat "nothing requested yet" as "not loading" and
+        // reapply whatever stale/blank buffer s_disp_buf already held —
+        // a black screen the very first time art is ever shown after boot.
+        if (strcmp(s_pending, s_current) != 0) s_loading = true;
+    } else {
+        s_pending[0] = '\0';
+    }
     xSemaphoreGive(s_url_mutex);
 }
 
@@ -368,8 +397,10 @@ bool album_art_update(lv_obj_t *img_obj)
 {
     if (!s_new_art || !img_obj) return false;
     s_new_art = false;
-    s_loading = false;
-    s_art_dsc.data = (const uint8_t *)s_disp_buf;
+    // s_art_dsc.data is kept current by art_task itself the instant a
+    // decode lands (see the swap in art_task) — this just tells the
+    // caller "yes, something new arrived" and re-applies it to pick up
+    // the change visually.
     lv_img_set_src(img_obj, &s_art_dsc);
     return true;
 }

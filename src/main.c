@@ -1,14 +1,25 @@
 /**
  * Album & NFC Sonos controller — boot sequence and main NFC-tap loop.
  *
- * The screen is one of four states, continuously re-evaluated (not just
+ * The screen is one of five states, continuously re-evaluated (not just
  * decided once at boot):
- *   Boot  — no WiFi
- *   Wifi  — WiFi connected, no Sonos speaker found
- *   Ready — WiFi + speaker, but nothing actively playing (idle/paused)
- *   Art   — WiFi + speaker + actively playing: fullscreen album art
+ *   Boot        — no WiFi
+ *   Wifi        — WiFi connected, no Sonos speaker found
+ *   WifiSpeaker — WiFi + speaker connected, NFC reader not yet confirmed
+ *   Ready       — WiFi + speaker + NFC all confirmed, nothing playing
+ *   Art         — WiFi + speaker + actively playing: fullscreen album art
  * While new art is loading, the Boot vinyl is shown with a small spinner
  * inside its label hole, rather than a blank screen.
+ *
+ * boot_task() walks Boot -> Wifi -> WifiSpeaker in order as each
+ * condition is actually met, holding each on screen for at least
+ * BOOT_STEP_MIN_DISPLAY_MS so the progression is visible even when
+ * everything connects quickly — without that, the live state machine's
+ * first evaluation (once nfc_loop_task starts) could find every
+ * condition already true and jump straight to the final state, skipping
+ * the intermediate ones entirely. From Ready/Art onward, nfc_loop_task's
+ * continuous evaluation takes over for live reacting (pausing, losing
+ * WiFi, the speaker or the NFC reader going away, etc.).
  *
  * An NFC tap plays a track via Spotify on that speaker: a good tap plays
  * a short chime sound, a bad tap (tag present, undecodable) gets two
@@ -41,6 +52,7 @@ typedef enum {
     UI_MODE_NONE = -1,   // forces the first ui_apply_mode() call to actually apply something
     UI_MODE_BOOT,
     UI_MODE_WIFI,
+    UI_MODE_WIFI_SPEAKER,
     UI_MODE_READY,
     UI_MODE_LOADING,
     UI_MODE_ART,
@@ -53,6 +65,14 @@ static ui_mode_t s_ui_mode = UI_MODE_NONE;
 
 static void nfc_loop_task(void *arg);
 static void boot_task(void *arg);
+
+// Waits out whatever's left of BOOT_STEP_MIN_DISPLAY_MS since step_start_ms
+// — a no-op if that much time has already passed on its own.
+static void hold_boot_step_minimum(uint32_t step_start_ms)
+{
+    uint32_t elapsed = (uint32_t)(esp_timer_get_time() / 1000ULL) - step_start_ms;
+    if (elapsed < BOOT_STEP_MIN_DISPLAY_MS) vTaskDelay(pdMS_TO_TICKS(BOOT_STEP_MIN_DISPLAY_MS - elapsed));
+}
 
 static void ui_screen_create(void)
 {
@@ -94,10 +114,11 @@ static void ui_screen_create(void)
     lv_scr_load(scr);
 }
 
-// Applies whichever of {Boot, Wifi, Ready, loading-vinyl, live album art}
-// the current mode calls for. Only touches the display when the mode
-// actually changes, except for live art, which is re-checked every call
-// so newly-decoded art gets picked up without needing its own transition.
+// Applies whichever of {Boot, Wifi, WifiSpeaker, Ready, loading-vinyl,
+// live album art} the current mode calls for. Only touches the display
+// when the mode actually changes, except for live art, which is
+// re-checked every call so newly-decoded art gets picked up without
+// needing its own transition.
 static void ui_apply_mode(ui_mode_t mode)
 {
     if (mode != s_ui_mode) {
@@ -110,6 +131,11 @@ static void ui_apply_mode(ui_mode_t mode)
             break;
         case UI_MODE_WIFI:
             lv_img_set_src(s_art_img, ui_asset_wifi());
+            lv_obj_add_flag(s_spinner, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(s_version_label, LV_OBJ_FLAG_HIDDEN);
+            break;
+        case UI_MODE_WIFI_SPEAKER:
+            lv_img_set_src(s_art_img, ui_asset_wifispeaker());
             lv_obj_add_flag(s_spinner, LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(s_version_label, LV_OBJ_FLAG_HIDDEN);
             break;
@@ -165,7 +191,6 @@ static void boot_task(void *arg)
 
     ESP_ERROR_CHECK(tca9554_init());   // I2C IO expander — must be up before display_init()
     ESP_ERROR_CHECK(display_init());
-    display_set_backlight(true);
 
 #if 0   // DIAGNOSTIC — rendering path confirmed clean (swatches + gradient + WiFi icon all perfect); re-enable if needed
     if (display_lock(5000)) {
@@ -191,9 +216,29 @@ static void boot_task(void *arg)
         ui_screen_create();   // shows the Boot vinyl immediately
         display_unlock();
     }
+    // Only turn the backlight on once the Boot image is actually loaded —
+    // previously this ran right after display_init(), while the panel was
+    // still showing whatever was in its own GRAM from before this boot
+    // (stale content on a soft reset, since PSRAM/panel memory isn't
+    // cleared by that — e.g. a flash of the previous session's album art),
+    // for the entire ui_assets_init() JPEG-decode window.
+    display_set_backlight(true);
+    uint32_t step_start_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
     bool wifi_ok = wifi_manager_wait_connect(WIFI_CONNECT_TIMEOUT_MS);
     ESP_LOGI(TAG, "WiFi: %s", wifi_ok ? wifi_manager_ip() : "not connected");
+
+    // Hold Boot visible for a minimum stretch before moving on, however
+    // fast WiFi actually connected — see the file header comment for why.
+    hold_boot_step_minimum(step_start_ms);
+
+    if (wifi_ok) {
+        if (display_lock(1000)) {
+            ui_apply_mode(UI_MODE_WIFI);
+            display_unlock();
+        }
+        step_start_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    }
 
     sonos_controller_init();
     bool sonos_ok = false;
@@ -201,9 +246,21 @@ static void boot_task(void *arg)
     ESP_LOGI(TAG, "Sonos: %s", sonos_ok ? sonos_active_speaker_name() : "not found");
     if (sonos_ok) sonos_controller_start_polling();
 
+    if (wifi_ok) hold_boot_step_minimum(step_start_ms);
+
+    if (wifi_ok && sonos_ok) {
+        if (display_lock(1000)) {
+            ui_apply_mode(UI_MODE_WIFI_SPEAKER);
+            display_unlock();
+        }
+        step_start_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    }
+
     album_art_init();
     nfc_reader_init();
     buzzer_init();
+
+    if (wifi_ok && sonos_ok) hold_boot_step_minimum(step_start_ms);
 
     // Started unconditionally — proving buzzer/NFC comms doesn't depend on
     // a speaker being found, and this is also what drives the continuous
@@ -220,6 +277,10 @@ static void nfc_loop_task(void *arg)
     char     last_art_url[512] = {0};
     char     tap_uri[256];
     uint32_t force_loading_until_ms = 0;   // 0 = no tap-triggered override active
+    uint32_t ready_since_ms = 0;           // 0 = not currently on an unbroken Ready streak
+    int      last_brightness_pct = 100;    // avoids redundant LEDC writes every poll
+    bool     cmd_was_pending = false;      // edge-detects sonos_is_cmd_pending() going false
+    uint32_t cmd_cleared_ms = 0;           // 0 = not within the post-cmd settle grace window
 
     for (;;) {
         nfc_tap_result_t tap = nfc_reader_poll(tap_uri, sizeof(tap_uri));
@@ -238,23 +299,62 @@ static void nfc_loop_task(void *arg)
 
         // Pull whatever's now playing and request fresh art when it
         // changes — kept up to date in the background even while paused,
-        // so art is ready the instant playback resumes.
+        // so art is ready the instant playback resumes. Deferred while a
+        // tap-triggered play is still being set up: album_art_request()'s
+        // download holds the shared network mutex for its whole multi-
+        // second transfer, which starved sonos_controller's own time-
+        // sensitive queue-verification SOAP calls in testing and made a
+        // tap that actually succeeded get reported as failed. last_art_url
+        // is left unchanged so the request still fires once it's no
+        // longer pending.
         sonos_track_t track;
         sonos_get_track(&track);
-        if (track.valid && strcmp(track.album_art_url, last_art_url) != 0) {
+        if (track.valid && strcmp(track.album_art_url, last_art_url) != 0 && !sonos_is_cmd_pending()) {
             strncpy(last_art_url, track.album_art_url, sizeof(last_art_url) - 1);
             album_art_request(last_art_url);
         }
+
+        // Edge-detect sonos_is_cmd_pending() going false, to cover the gap
+        // *after* cmd_task finishes but *before* poll_task's own 2s-interval
+        // schedule has had a chance to refresh track.transport_state — right
+        // at that edge, the last-known reading can still be the transient
+        // STOPPED a queue rebuild reports while setup was in progress, not
+        // yet whatever actually follows it (TRANSITIONING/PLAYING/genuinely
+        // not playing).
+        bool cmd_pending_now = sonos_is_cmd_pending();
+        if (cmd_was_pending && !cmd_pending_now) {
+            cmd_cleared_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        }
+        cmd_was_pending = cmd_pending_now;
+        bool in_settle_grace = cmd_cleared_ms != 0 &&
+            (uint32_t)(esp_timer_get_time() / 1000ULL) - cmd_cleared_ms < CMD_SETTLE_GRACE_MS;
 
         // Stop waiting the instant Sonos settles into a non-playing state
         // that isn't still working toward playback — no point riding out
         // the full timeout once we already know it's not going to play
         // (e.g. it went straight to PAUSED_PLAYBACK and is staying there).
+        // While a tap-triggered play is still pending, or within the settle
+        // grace window right after it finishes, ignore transport state
+        // entirely: a queue rebuild reports a real but transient STOPPED
+        // before anything has a chance to start, which was cancelling the
+        // loading screen (and its spinner) well before setup actually
+        // finished and its effects had shown up in a fresh poll.
         bool settled_not_playing = track.valid && !track.is_playing && track.transport_state[0] &&
-                                    strcmp(track.transport_state, "TRANSITIONING") != 0;
+                                    strcmp(track.transport_state, "TRANSITIONING") != 0 &&
+                                    !cmd_pending_now && !in_settle_grace;
         if (settled_not_playing) force_loading_until_ms = 0;
 
-        bool playing_with_art = track.valid && track.is_playing && !album_art_is_loading();
+        // While a tap-triggered play is pending, don't trust is_playing as
+        // "we've reached the new target" — it's necessarily stale data
+        // about whatever was playing *before* this tap, and the forced-
+        // loading branch below unconditionally clears force_loading_until_ms
+        // once reached. Without this guard, a tap that landed while art was
+        // already showing could see that stale is_playing still true for
+        // one more poll cycle, wipe out the just-set override immediately,
+        // and then fall through to a bare Ready (no spinner) the instant
+        // the queue-clear actually took effect and is_playing caught up.
+        bool playing_with_art = track.valid && track.is_playing && !album_art_is_loading() &&
+                                 !cmd_pending_now;
         bool forced_loading   = force_loading_until_ms != 0 &&
                                  (uint32_t)(esp_timer_get_time() / 1000ULL) < force_loading_until_ms;
         // Sonos reports TRANSITIONING while actively working toward a new
@@ -282,6 +382,11 @@ static void nfc_loop_task(void *arg)
             // (e.g. right after boot) must not, with nothing actually
             // about to show.
             desired = UI_MODE_LOADING;
+        } else if (!nfc_reader_is_healthy()) {
+            // Nothing's actually playing right now, so this is the "idle"
+            // choice between WifiSpeaker and Ready — don't invite a tap
+            // the reader can't actually service.
+            desired = UI_MODE_WIFI_SPEAKER;
         } else {
             desired = UI_MODE_READY;   // tap override (if any) timed out without ever reaching Art
         }
@@ -294,6 +399,29 @@ static void nfc_loop_task(void *arg)
             // if the UI ever seems to "miss" a transition (e.g. spinner
             // never appearing despite the state machine wanting it).
             ESP_LOGW(TAG, "display_lock busy, dropped mode change %d -> %d", s_ui_mode, desired);
+        }
+
+        // Idle dimming: only while continuously on Ready (nothing playing,
+        // nothing actionable on screen). Any other mode — a tap, playback
+        // starting, losing WiFi/the speaker — restores full brightness
+        // immediately rather than ramping back up, so the screen is never
+        // dim right when something actually changed.
+        uint32_t now_ms_val = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        if (desired == UI_MODE_READY) {
+            if (ready_since_ms == 0) ready_since_ms = now_ms_val;
+            uint32_t ready_elapsed = now_ms_val - ready_since_ms;
+            int pct;
+            if (ready_elapsed < READY_DIM_IDLE_MS) {
+                pct = 100;
+            } else {
+                uint32_t ramp_elapsed = ready_elapsed - READY_DIM_IDLE_MS;
+                pct = (ramp_elapsed >= READY_DIM_RAMP_MS) ? READY_DIM_TARGET_PCT
+                      : 100 - (int)((100 - READY_DIM_TARGET_PCT) * ramp_elapsed / READY_DIM_RAMP_MS);
+            }
+            if (pct != last_brightness_pct) { display_set_brightness(pct); last_brightness_pct = pct; }
+        } else {
+            ready_since_ms = 0;
+            if (last_brightness_pct != 100) { display_set_brightness(100); last_brightness_pct = 100; }
         }
 
         vTaskDelay(pdMS_TO_TICKS(NFC_POLL_INTERVAL_MS));

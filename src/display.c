@@ -134,7 +134,15 @@ esp_err_t display_init(void)
     display_set_backlight(false);
 
     // 5. LVGL port
-    const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+    lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+    // Default task_affinity (-1, either core) lets the scheduler land this
+    // on core 1 at times, where album_art.c's art_task runs pinned at a
+    // much higher priority (10) for its JPEG decode/scale step — that's
+    // CPU-bound, not I/O-wait, so when it runs it preempts anything lower
+    // priority sharing that core, including this task, freezing the
+    // spinner animation for however long the decode takes. Pinning this
+    // to core 0 keeps the two from ever contending for the same core.
+    lvgl_cfg.task_affinity = 0;
     ESP_ERROR_CHECK(lvgl_port_init(&lvgl_cfg));
 
     const lvgl_port_display_cfg_t disp_cfg = {

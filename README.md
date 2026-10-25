@@ -47,21 +47,24 @@ board — no extra wiring needed for those.
 
 ## Status
 
-As of **V1.1**, confirmed working end-to-end on real hardware: boot →
-WiFi/speaker discovery → the full Boot/Wifi/Ready/Art UI cycle, live
-playback-state reacting (pause/resume, external track changes), NFC tag
-read, and NFC-triggered Spotify playback.
+As of **V1.1** (firmware version string; the fixes below landed on top of
+it without a version bump yet), confirmed working end-to-end on real
+hardware: boot → WiFi/speaker discovery → the full
+Boot/Wifi/WifiSpeaker/Ready/Art UI cycle, live playback-state reacting
+(pause/resume, external track changes, NFC-tap-triggered plays), NFC tag
+read, NFC-triggered Spotify playback, and idle screen dimming.
 
 | Feature | Status |
 |---|---|
-| Build-time WiFi config (no captive portal/web server) | Done |
-| UI states (Boot/Wifi/Ready/Art, live-reactive) | Done — confirmed on hardware, including external track changes and pause/resume |
+| Build-time WiFi config (no captive portal/web server) | Done — captive-portal web setup is next up, see Outstanding work |
+| UI states (Boot/Wifi/WifiSpeaker/Ready/Art, live-reactive) | Done — confirmed on hardware, including external track changes, pause/resume, and NFC-tap-triggered plays |
 | Sonos discovery, configurable target speaker | Done |
-| Fullscreen album art + loading spinner (inside the vinyl's label hole) | Done |
+| Fullscreen album art + loading spinner (inside the vinyl's label hole) | Done — see "Fixed bugs of note" below for several real races this went through |
 | NFC tag read (UID + NDEF text) | Done — real UID detection and NDEF parsing confirmed on hardware. Self-heals from a lost boot-time antenna-enable (see `docs/NFC_PROTOCOL.md`'s Gotchas) — confirm wiring/grounding first if taps stop registering despite otherwise-healthy comms |
 | NFC → Spotify playback on tap | Done — confirmed end-to-end on hardware, still via a **temporary hardcoded test URI** (see below); needs a real NDEF-written tag to fully retire that override |
 | Good-tap sound / bad-tap beep feedback | Done — confirmed on hardware; tap-sound volume has gone through several rounds of reduction and may still need another pass, and a distinct custom tone (rather than just a quieter version of the current clip) is wanted |
 | Live playback-state reacting (pause/resume switches Ready ↔ Art automatically) | Done — confirmed on hardware |
+| Idle screen dimming (Ready screen only) | Done — see "Idle dimming" below |
 | Boot-screen version label | Done |
 | Album art download/scale speed | Was 10-50s, now ~2-3s typically — see `docs/NFC_PROTOCOL.md`'s note on the UART console conflict. Direct Spotify CDN links get resized to 300x300 before downloading (see `album_art.c`); art served through Sonos's `/getaa` proxy stays at 640x640 and is scaled locally — confirmed by direct testing that `/getaa` ignores every resize query param for Spotify content, so this isn't fixable from our side |
 | Sonos playback reliability | Several real failure modes found and fixed (see "Sonos playback reliability" below) by probing the speaker directly during testing — some intermittent failures during this round of testing may be regional network interference rather than a firmware issue, needs retesting in a different network environment |
@@ -98,23 +101,46 @@ Controller project or any NFC Tools app for that; this project only reads.
 
 ## UI states & assets
 
-The screen is one of four states, re-evaluated continuously (not just
+The screen is one of five states, re-evaluated continuously (not just
 decided once at boot) by `main.c`'s `nfc_loop_task`:
 
 | State | Shown when | Artwork |
 |---|---|---|
 | **Boot** | No WiFi | Plain vinyl record + firmware version (`V` + `FIRMWARE_VERSION` from `app_config.h`), `src/assets/boot.jpg` |
 | **Wifi** | WiFi connected, no Sonos speaker found | Vinyl with a WiFi icon, `src/assets/wifi.jpg` |
-| **Ready** | WiFi + speaker found, nothing actively playing (idle/paused/stopped) | Vinyl with an NFC icon + "TAP A CARD · PLAY AN ALBUM", `src/assets/ready.jpg` |
+| **WifiSpeaker** | WiFi + speaker found, NFC reader not yet confirmed working | Vinyl with an NFC icon (no "tap a card" text), `src/assets/wifispeaker.jpg` |
+| **Ready** | WiFi + speaker + NFC all confirmed, nothing actively playing (idle/paused/stopped) | Vinyl with an NFC icon + "TAP A CARD · PLAY AN ALBUM", `src/assets/ready.jpg` |
 | **Art** | WiFi + speaker found, actively playing | Fullscreen Sonos/Spotify album art |
+
+`main.c`'s `boot_task()` walks Boot → Wifi → WifiSpeaker in order as each
+condition is actually met during boot, holding each one on screen for at
+least `BOOT_STEP_MIN_DISPLAY_MS` (`app_config.h`) — without that, a fast
+WiFi/Sonos connection could make the live state machine's first
+evaluation find every condition already true at once and jump straight
+to the final state, skipping the intermediate screens entirely (this
+genuinely happened before this was added).
 
 Playback state is polled live from the speaker (AVTransport's
 `GetTransportInfo` → `CurrentTransportState`), so pausing/stopping a track
 switches back to **Ready** automatically, and resuming switches back to
-**Art** — not just a one-time decision at boot.
+**Art** — not just a one-time decision at boot. The NFC reader's health
+(`nfc_reader_is_healthy()`) is also checked live, so Ready only ever
+invites a tap when the reader is actually confirmed working.
 
 While new art is downloading/decoding, the **Boot** vinyl is shown with a
 small spinner inside its label hole (not a blank screen or stale art).
+
+### Idle dimming
+
+Only while continuously on **Ready** (nothing playing, nothing actionable
+on screen): after `READY_DIM_IDLE_MS` with no state change, brightness
+ramps linearly from 100% down to `READY_DIM_TARGET_PCT` over
+`READY_DIM_RAMP_MS` (`app_config.h`). Any other state — a tap, playback
+starting, losing WiFi/the speaker — snaps brightness back to 100%
+immediately rather than ramping back up, so the screen is never still dim
+right when something actually happened. Implemented in `main.c`'s
+`nfc_loop_task`, driven by the existing PWM/LEDC backlight
+(`display_set_brightness()` in `display.c`).
 
 ### Asset pipeline
 
@@ -122,7 +148,7 @@ Source artwork lives in `Assets/` (the original 1260×1264 PNGs — not used
 directly) and `src/assets/` (the processed files actually embedded in the
 firmware):
 
-- `boot.jpg` / `wifi.jpg` / `ready.jpg` — each source PNG cropped to a
+- `boot.jpg` / `wifi.jpg` / `wifispeaker.jpg` / `ready.jpg` — each source PNG cropped to a
   centered square, resized to 360×360, and saved as JPEG (quality 90).
   Decoded once at boot in `ui_assets.c` using the same TJpgDec-based
   decoder as `album_art.c`.
@@ -140,7 +166,7 @@ firmware):
   44-byte header (`afconvert`'s output pads it further).
 
 All four files are embedded into the firmware as **plain generated C byte
-arrays** (`src/assets/boot_jpg.c`, `wifi_jpg.c`, `ready_jpg.c`,
+arrays** (`src/assets/boot_jpg.c`, `wifi_jpg.c`, `wifispeaker_jpg.c`, `ready_jpg.c`,
 `nfc_tap_wav.c` + matching `.h` files), run through
 `src/assets/generate.py`:
 
@@ -156,7 +182,7 @@ no such issue and are picked up by `src/CMakeLists.txt`'s normal `*.c`
 glob like any other source file.
 
 **To replace any of these assets:** overwrite the matching raw file in
-`src/assets/` (`boot.jpg`/`wifi.jpg`/`ready.jpg`/`nfc_tap.wav` — keeping
+`src/assets/` (`boot.jpg`/`wifi.jpg`/`wifispeaker.jpg`/`ready.jpg`/`nfc_tap.wav` — keeping
 the same name/format/dimensions), run `python3 src/assets/generate.py` to
 regenerate the C sources, then rebuild. No other code changes needed
 unless the dimensions or audio format change.
@@ -211,8 +237,11 @@ All tunables live in [`src/app_config.h`](src/app_config.h):
 | `SPOTIFY_DEFAULT_SID`/`SN` | Cold-start Spotify service params (learned from any currently-playing Spotify track if available) |
 | `ART_MAX_DOWNLOAD_BYTES` | Download buffer cap (768KB — headroom over real covers) |
 | `NFC_UART_BAUD` | 115200, confirmed from the module's manufacturer listing |
-| `NFC_POLL_INTERVAL_MS` | How often the NFC loop checks for a tag (and re-evaluates the UI state) |
+| `NFC_POLL_INTERVAL_MS` | How often the NFC loop checks for a tag, and re-evaluates the UI state/dimming — 100ms; idle sampling rate only, independent of the one-off per-tag SELECT/AUTH/READ cost and of `ANTENNA_REASSERT_INTERVAL_MS` |
 | `BEEP_FREQ_HZ`/`DURATION_MS`/`GAP_MS` | Synthesized bad-tap beep tone (good tap uses the `nfc_tap.wav` sound clip instead) |
+| `TAP_LOADING_TIMEOUT_MS` | Max time the loading screen rides out a tap-triggered play before falling back if nothing ever actually started |
+| `CMD_SETTLE_GRACE_MS` | How long after a tap-triggered play finishes setup to keep ignoring a stale "not playing" transport reading — see "Sonos playback reliability" |
+| `READY_DIM_IDLE_MS`/`RAMP_MS`/`TARGET_PCT` | Idle screen dimming on Ready — see "Idle dimming" above |
 
 Hardware pins: [`src/board_config.h`](src/board_config.h).
 
@@ -260,12 +289,63 @@ modes:
   made the following `Seek`/`Play` fail outright with SOAP 500s. Fixed by
   actually checking `NrTracks` after the settle delay, with one retry of
   the add, rather than trusting the HTTP status alone.
+- **Album art prefetch starving the queue-verification retry.**
+  `album_art.c`'s download holds the shared network mutex (`g_network_mutex`)
+  for its whole multi-second transfer. If that prefetch landed while
+  `cmd_task` was mid-sequence verifying the queue actually populated, its
+  SOAP retry got starved long enough to misreport a tap that had actually
+  succeeded as "giving up." Fixed by exposing `sonos_is_cmd_pending()`
+  (`sonos_controller.c`) and having `main.c`'s `nfc_loop_task` defer firing
+  `album_art_request()` while a tap-triggered play is still being set up —
+  it fires on the next iteration once no longer pending, nothing is lost.
+- **Stale `transport_state` reads right after setup finishes.**
+  `poll_task` only refreshes `transport_state`/`is_playing` every
+  `SONOS_POLL_INTERVAL_MS` on its own schedule. The instant
+  `sonos_is_cmd_pending()` clears, the last-known reading can still be the
+  transient `STOPPED` a queue rebuild reports *during* setup, not yet
+  whatever actually follows — which was enough to cancel the tap's loading
+  screen and briefly show bare Ready with no spinner. Fixed with a
+  `CMD_SETTLE_GRACE_MS` window after `cmd_pending` clears (`main.c`),
+  during which a "not playing" reading isn't trusted as genuinely settled.
 
 Some playback failures during this project's testing may be regional
 network interference between the Sonos speaker and Spotify's servers
 rather than anything in this firmware — worth retesting in a different
 network environment before chasing further "intermittent" failures as
 code bugs.
+
+## Fixed bugs of note
+
+A few non-obvious races worth knowing about if they ever resurface:
+
+- **Black screen the first time Art mode was ever reached.**
+  `album_art.c`'s `s_art_dsc.data` pointer was only updated inside
+  `album_art_update()`, which only runs while the UI is actually showing
+  Art. `art_task` only waits up to `ART_CONSUMED_TIMEOUT_MS` for that to
+  happen before moving on; if a track was queued/decoded while paused and
+  that timeout elapsed before Art mode was ever entered, the decoded image
+  was silently discarded and the pointer stayed stuck at whatever the
+  buffer held *before* that decode — the pristine all-zero buffer on a
+  fresh boot. Fixed by updating `s_art_dsc.data` synchronously inside
+  `art_task` the instant a decode lands, not deferred to consumption.
+- **Spinner animation freezing mid-tap.** `album_art.c`'s `art_task` runs
+  pinned to core 1 at priority 10 for its JPEG decode/scale step (CPU-bound,
+  not I/O-wait). The LVGL port's task defaults to no core affinity, so it
+  could land on core 1 too and get preempted for however long that decode
+  took. Fixed by pinning the LVGL port task to core 0 in `display.c`.
+- **Boot-time flash of stale/corrupted screen content.** The backlight was
+  turned on right after `display_init()`, before `ui_assets_init()`
+  (JPEG-decoding 4 images) and `ui_screen_create()` had actually loaded the
+  Boot image — showing whatever was left in the panel's own GRAM from
+  before this boot (panel memory isn't cleared by a soft reset) for that
+  whole window. Fixed by moving `display_set_backlight(true)` to after the
+  Boot screen is actually created, in `main.c`'s `boot_task()`.
+- **NFC double-taps at the faster poll interval.** The UID de-dupe latch
+  cleared on the very first missed `REQUEST` reply — rare enough to not
+  matter at the old 300ms poll interval, but common enough at 100ms to
+  double-fire a play for a card that never actually left the reader. Fixed
+  with a 3-consecutive-miss debounce before clearing the latch (see
+  `docs/NFC_PROTOCOL.md`'s Gotchas).
 
 ## Troubleshooting
 

@@ -17,12 +17,8 @@
 // 0x7F [cmd] [data...] 0xF7 (0x55 tail on error) — confirmed against a
 // working reference library for this exact module
 // (github.com/TCL47-GITHUB/RC522_UART). Not auto-reporting: every read is
-// us sending REQUEST then ANTICOLL. See nfc_reader.c.
-//
-// STILL TODO: nfc_reader_poll() currently confirms real taps (logs the
-// UID) but doesn't yet pull the NDEF "service:type:id" text out of the
-// card — that needs SELECT + AUTH + READ on the right data block, so
-// every real tap currently reports NFC_TAP_BAD rather than GOOD.
+// us sending REQUEST then ANTICOLL, then SELECT + AUTH + READ to pull the
+// NDEF "service:type:id" text off the card. See nfc_reader.c.
 
 typedef enum {
     NFC_TAP_NONE,   // nothing new
@@ -35,3 +31,9 @@ void nfc_reader_init(void);
 // Call periodically (e.g. every NFC_POLL_INTERVAL_MS from the main loop).
 // On NFC_TAP_GOOD, uri_out holds the decoded "service:type:id" string.
 nfc_tap_result_t nfc_reader_poll(char *uri_out, size_t uri_out_sz);
+
+// True once ANT_ON has been confirmed acknowledged by the module — either
+// at boot or via nfc_reader_poll()'s periodic re-assertion. Lets the UI
+// distinguish "WiFi + speaker connected, but the NFC reader itself isn't
+// confirmed working yet" from genuinely ready to tap.
+bool nfc_reader_is_healthy(void);

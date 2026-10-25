@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regenerates the C byte-array sources in this directory from the raw
-asset files (boot.jpg, wifi.jpg, ready.jpg, nfc_tap.wav) sitting alongside
-this script.
+asset files (boot.jpg, wifi.jpg, wifispeaker.jpg, ready.jpg, nfc_tap.wav)
+sitting alongside this script.
 
 Why C arrays instead of idf_component_register's EMBED_FILES: EMBED_FILES
 generates mangled/doubled intermediate .S-file paths under PlatformIO's
@@ -20,10 +20,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # (source file, output basename, C identifier prefix)
 ASSETS = [
-    ("boot.jpg",    "boot_jpg",    "boot_jpg"),
-    ("wifi.jpg",    "wifi_jpg",    "wifi_jpg"),
-    ("ready.jpg",   "ready_jpg",   "ready_jpg"),
-    ("nfc_tap.wav", "nfc_tap_wav", "nfc_tap_wav"),
+    ("boot.jpg",        "boot_jpg",        "boot_jpg"),
+    ("wifi.jpg",        "wifi_jpg",        "wifi_jpg"),
+    ("wifispeaker.jpg", "wifispeaker_jpg", "wifispeaker_jpg"),
+    ("ready.jpg",       "ready_jpg",       "ready_jpg"),
+    ("nfc_tap.wav",     "nfc_tap_wav",     "nfc_tap_wav"),
 ]
 
 # The converted clip's peak was ~85% of full scale (measured directly).

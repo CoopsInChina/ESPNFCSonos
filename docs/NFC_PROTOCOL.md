@@ -141,7 +141,12 @@ See `read_ndef_text()` in `src/nfc_reader.c`.
   while a tag rests on the reader, but this latch must be cleared whenever
   `REQUEST` times out (no card present) — otherwise re-presenting the
   *same* physical tag a second time is silently swallowed forever. See the
-  comment at the top of `nfc_reader_poll()`.
+  comment at the top of `nfc_reader_poll()`. **Don't clear it on the first
+  miss**, though: a single missed `REQUEST` reply (noise, a brief field
+  dropout, slight card wobble) while the card is still genuinely resting on
+  the reader is rare at a slow poll interval but common enough at a fast
+  one (100ms) to double-fire a play for a card that never left. Requires
+  `UID_ABSENCE_CONFIRM_MISSES` (3) consecutive misses before clearing.
 - **HALT ordering**, as above — halt only after you're done with the card
   for this tap, never before reading it.
 - **`ANT_ON` (and the reset/enter-normal-mode handshake) run exactly once,
@@ -156,6 +161,23 @@ See `read_ndef_text()` in `src/nfc_reader.c`.
   re-asserting `ANT_ON` in `nfc_reader_poll()` (`reassert_antenna_if_due()`,
   every `ANTENNA_REASSERT_INTERVAL_MS`) — idempotent and cheap, so a lost
   boot-time init self-heals without a manual reboot.
+- **A well-formed `TAIL_ERR` reply isn't a link health problem.** The
+  periodic `ANT_ON` reassert above used to treat *any* non-`TAIL_OK` reply
+  as "unhealthy," including a clean `TAIL_ERR` NAK (plausibly "already on")
+  — which silently reverted the UI from Ready to WifiSpeaker every reassert
+  interval even though the module was responding fine. Link health
+  (`nfc_reader_is_healthy()`) now tracks whether the exchange was
+  well-formed at all (logged as `NFC_LINK_NORMAL`, OK or ERR both count),
+  not the specific OK-vs-ERR outcome of one command.
+- **Command echo isn't limited to `REQUEST`.** Some firmware echoes the
+  exact frame just sent back before its real reply — originally only
+  handled for `REQUEST`'s known echo pattern, which missed it when the
+  periodic `ANT_ON` reassert got echoed too, misclassifying it as
+  corrupt/abnormal. `recv_packet()` now checks incoming bytes against
+  whatever `send_packet()` actually last transmitted, for any command, as
+  a prefix match checked before (not only once) the reply's own expected
+  length is reached — a short reply like `ANT_ON`'s 2-byte ack would
+  otherwise get judged against a still-incomplete longer echo.
 - **Ground matters, and more isn't always better.** A real failure mode
   seen on this hardware: with the module's UART ground *not* connected to
   the ESP32, taps produced real data mixed with garbage; connecting that

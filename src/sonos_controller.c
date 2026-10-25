@@ -55,6 +55,7 @@ typedef struct { char uri[256]; } sonos_cmd_t;
 static QueueHandle_t  s_cmd_queue = NULL;
 static TaskHandle_t   s_poll_task = NULL;
 static TaskHandle_t   s_cmd_task_handle = NULL;
+static volatile bool  s_cmd_in_flight = false;   // true while cmd_task is running play_spotify_direct()
 
 static int s_spotify_sid = SPOTIFY_DEFAULT_SID;
 static int s_spotify_sn  = SPOTIFY_DEFAULT_SN;
@@ -373,8 +374,16 @@ static void update_transport_state(void)
     char state[32] = {0};
     bool got = extract_xml(resp, "CurrentTransportState", state, sizeof(state));
     bool playing = (strcmp(state, "PLAYING") == 0);
-    ESP_LOGI(TAG, "transport state: %s (extracted=%d) -> is_playing=%d",
-             got ? state : "<not found>", got, playing);
+
+    // Logging this every SONOS_POLL_INTERVAL_MS clogs the log during a long
+    // play with nothing actually changing — only log on a transition, same
+    // as nfc_reader.c's link-state logging.
+    static char s_last_logged_state[32] = {0};
+    if (strcmp(got ? state : "<not found>", s_last_logged_state) != 0) {
+        strncpy(s_last_logged_state, got ? state : "<not found>", sizeof(s_last_logged_state) - 1);
+        ESP_LOGI(TAG, "transport state: %s (extracted=%d) -> is_playing=%d",
+                 got ? state : "<not found>", got, playing);
+    }
 
     if (xSemaphoreTake(s_track_mutex, pdMS_TO_TICKS(50))) {
         s_track.is_playing = playing;
@@ -583,9 +592,26 @@ static void cmd_task(void *arg)
     sonos_cmd_t cmd;
     for (;;) {
         if (xQueueReceive(s_cmd_queue, &cmd, portMAX_DELAY) == pdTRUE) {
+            // Block the opportunistic album art prefetch (see
+            // sonos_is_cmd_pending()) for the duration: it holds
+            // g_network_mutex for its whole multi-second HTTP download,
+            // which starved this function's own queue-verification SOAP
+            // retries in testing and made a tap that actually succeeded
+            // report "giving up" because its own status check timed out.
+            s_cmd_in_flight = true;
             play_spotify_direct(cmd.uri);
+            s_cmd_in_flight = false;
         }
     }
+}
+
+// True while a tap-triggered play is being set up on the speaker — lets
+// callers (the opportunistic album art prefetch) defer and avoid
+// contending with this function's own time-sensitive SOAP calls for the
+// shared network mutex.
+bool sonos_is_cmd_pending(void)
+{
+    return s_cmd_in_flight;
 }
 
 bool sonos_play_spotify_uri(const char *uri)

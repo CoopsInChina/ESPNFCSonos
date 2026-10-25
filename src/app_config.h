@@ -36,6 +36,22 @@
 // if nothing ever actually started playing.
 #define TAP_LOADING_TIMEOUT_MS      20000
 
+// How long after sonos_is_cmd_pending() clears (cmd_task finished the
+// queue setup) to keep ignoring a "not playing" transport_state reading
+// as stale rather than genuinely settled. poll_task only refreshes that
+// state every SONOS_POLL_INTERVAL_MS on its own schedule, so right after
+// setup finishes the last-known reading can still be the transient STOPPED
+// seen *during* setup, not yet whatever comes after — needs to cover at
+// least one full poll cycle plus call latency.
+#define CMD_SETTLE_GRACE_MS         4000
+
+// Minimum time each of the Boot/Wifi/WifiSpeaker boot-sequence screens
+// stays up before moving to the next step, even if the underlying
+// condition (WiFi connects, speaker is found) resolves faster than that
+// — without this, a fast connection can make a step flash by too
+// quickly to actually see.
+#define BOOT_STEP_MIN_DISPLAY_MS    2000
+
 // Spotify service parameters for direct (server-free) playback, same
 // scheme as Grill & Groove's sonos_controller.c: sid = Spotify service id
 // on this Sonos household, sn = account serial. Only individual tracks
@@ -61,13 +77,28 @@
 // TTL, fixed baud 115200 — a bridging-MCU product with its own protocol,
 // not the bare MFRC522 chip's native 9600-default register interface.
 #define NFC_UART_BAUD        115200
-#define NFC_POLL_INTERVAL_MS 300
+// Idle sampling rate only — how often we ask "is a card here?" when
+// nothing's present. Independent of the one-off per-tag SELECT/AUTH/READ
+// cost once a card IS detected, and of ANTENNA_REASSERT_INTERVAL_MS (see
+// nfc_reader.c). At 115200 baud a "no card" REQUEST round-trip is on the
+// order of a few ms, comfortably under 100ms; a 300ms interval meant a
+// quick tap-and-lift under ~300ms dwell could be missed between polls.
+#define NFC_POLL_INTERVAL_MS 100
 
 // ---- Buzzer (I2S tone through the onboard PCM5101 DAC — no discrete
 // piezo buzzer on this board, see buzzer.c) ----
 #define BEEP_FREQ_HZ       1800
 #define BEEP_DURATION_MS   120
 #define BEEP_GAP_MS        100   // gap between the two beeps of a bad-tap
+
+// ---- Screen dimming ----
+// Idle dimming only on the Ready screen (nothing playing, nothing to read
+// that benefits from full brightness) — any other mode restores full
+// brightness immediately. 100% -> 20% linearly over the ramp duration,
+// i.e. 20% per second / 2% per 100ms.
+#define READY_DIM_IDLE_MS      30000   // time on Ready before the ramp starts
+#define READY_DIM_RAMP_MS      4000    // ramp duration
+#define READY_DIM_TARGET_PCT   5       // floor brightness once ramped down
 
 // ---- NVS ----
 #define NVS_NAMESPACE        "album_nfc"

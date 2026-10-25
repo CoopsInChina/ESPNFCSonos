@@ -45,7 +45,24 @@ static const uint8_t CANDIDATE_KEYS[3][6] = {
     { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5 },   // MAD key (sector 0)
 };
 
-static char s_last_uid_hex[16] = {0};   // de-dupe: don't re-fire while the same tag sits on the reader
+static char         s_last_uid_hex[16] = {0};   // de-dupe: don't re-fire while the same tag sits on the reader
+static volatile bool s_healthy = false;         // ANT_ON confirmed acknowledged — see nfc_reader_is_healthy()
+
+// Consecutive missed REQUESTs required before treating the card as
+// actually removed (clearing s_last_uid_hex) — a single miss (noise, brief
+// field dropout, a bit of card wobble) was clearing it immediately, which
+// at the old 300ms poll interval was rare enough not to matter, but at the
+// current faster interval started reliably producing a second "tap" (and
+// a second play) for a card that never actually left the reader.
+#define UID_ABSENCE_CONFIRM_MISSES 3
+static int s_absence_misses = 0;
+
+// Logging every byte of every exchange clogs the log on a link that's
+// mostly just idling (REQUEST/no-card every poll). What's actually
+// useful is knowing when the link's *behavior* changes — log only on
+// that transition, not on every poll that confirms nothing changed.
+typedef enum { NFC_LINK_UNKNOWN, NFC_LINK_NORMAL, NFC_LINK_ABNORMAL, NFC_LINK_ERROR } nfc_link_state_t;
+static nfc_link_state_t s_link_state = NFC_LINK_UNKNOWN;
 
 static uint32_t now_ms(void)
 {
@@ -58,11 +75,6 @@ static void flush_rx(void)
     while (uart_read_bytes(NFC_UART_PORT, tmp, sizeof(tmp), 0) > 0) { }
 }
 
-// DIAGNOSTIC: logs every byte sent/received — re-added after NFC stopped
-// working again (was working, then wasn't, with no code change in
-// between) to see exactly what's actually going out and coming back
-// rather than guess. Strip once resolved — see the earlier removal
-// commit for why (clogs the log otherwise).
 static void log_hex(const char *label, const uint8_t *data, size_t len)
 {
     char hex[3 * 32];
@@ -71,6 +83,31 @@ static void log_hex(const char *label, const uint8_t *data, size_t len)
         hpos += snprintf(hex + hpos, sizeof(hex) - hpos, "%02X ", data[i]);
     ESP_LOGI(TAG, "%s (%u bytes): %s", label, (unsigned)len, hex);
 }
+
+static void set_link_state(nfc_link_state_t state)
+{
+    if (state == s_link_state) return;
+    s_link_state = state;
+    static const char *names[] = { "Unknown", "Normal", "Abnormal", "Error" };
+    ESP_LOGW(TAG, "NFC State: %s", names[state]);
+}
+
+// On the first poll that goes abnormal, also log the actual bytes that
+// triggered it — useful context exactly once, not on every poll while
+// it stays abnormal.
+static void note_abnormal(const uint8_t *data, size_t len)
+{
+    bool first = (s_link_state != NFC_LINK_ABNORMAL);
+    set_link_state(NFC_LINK_ABNORMAL);
+    if (first) log_hex("  first abnormal bytes", data, len);
+}
+
+// Bytes of the last frame we transmitted — some firmware echoes the
+// just-sent frame back before its real reply, for any command, not just
+// REQUEST. recv_packet() compares against this to recognize and skip that
+// echo regardless of which command triggered it.
+static uint8_t s_last_tx[32];
+static size_t  s_last_tx_len = 0;
 
 static void send_packet(uint8_t cmd, const uint8_t *data, size_t len)
 {
@@ -82,12 +119,16 @@ static void send_packet(uint8_t cmd, const uint8_t *data, size_t len)
     if (data && len) { memcpy(pkt + n, data, len); n += len; }
     pkt[n++] = TAIL_OK;
     uart_write_bytes(NFC_UART_PORT, (const char *)pkt, n);
-    log_hex("TX", pkt, n);
+    memcpy(s_last_tx, pkt, n);
+    s_last_tx_len = n;
 }
 
 // Reads a HEADER [data (expected_len bytes)] TAIL reply, resyncing on noise
 // exactly like the reference library does. Returns false on TAIL_ERR or
-// timeout.
+// timeout. A clean TAIL_OK or TAIL_ERR both count as NFC_LINK_NORMAL —
+// they're both well-formed replies (ERR just means "no card"/"not ok",
+// not a link problem); resyncing on noise is NFC_LINK_ABNORMAL; a hard
+// timeout is NFC_LINK_ERROR.
 static bool recv_packet(uint8_t *out, size_t expected_len, uint32_t timeout_ms)
 {
     uint8_t buf[32];
@@ -101,37 +142,45 @@ static bool recv_packet(uint8_t *out, size_t expected_len, uint32_t timeout_ms)
         if (got <= 0) continue;
         if (n < sizeof(buf)) buf[n++] = b;
 
+        // Some firmwares echo back exactly the frame we just sent, before
+        // the real reply — seen on REQUEST, but not guaranteed to be
+        // limited to it (the periodic ANT_ON reassert in
+        // reassert_antenna_if_due() sends a different, shorter frame).
+        // While what we have so far could still be a prefix of that echo,
+        // keep accumulating instead of falling into the n >= total check
+        // below — otherwise a short reply (like ANT_ON's 2-byte ack) gets
+        // judged, and misclassified as corrupt, before a longer echo even
+        // finishes arriving, which would make the periodic antenna
+        // reassert spuriously fail and flip nfc_reader_is_healthy() to
+        // false. Once the full echo has matched, discard it and keep
+        // waiting for the real reply; any mismatch falls through below.
+        if (s_last_tx_len && n <= s_last_tx_len && memcmp(buf, s_last_tx, n) == 0) {
+            if (n == s_last_tx_len) n = 0;
+            continue;
+        }
+
         if (n >= total) {
             if (buf[0] != HEADER) {
-                log_hex("RX (resync, bad header)", buf, n);
+                note_abnormal(buf, n);
                 memmove(buf, buf + 1, --n);
                 continue;
             }
             uint8_t tail = buf[n - 1];
 
-            // Some firmwares echo the just-sent REQUEST frame before the
-            // real reply — drop it and keep waiting.
-            if (n == 4 && buf[1] == CMD_REQUEST && buf[2] == REQ_ALL && tail == TAIL_OK) {
-                log_hex("RX (dropped REQUEST echo)", buf, n);
-                n = 0;
-                continue;
-            }
-
             if (tail == TAIL_OK) {
-                log_hex("RX (OK)", buf, n);
+                set_link_state(NFC_LINK_NORMAL);
                 if (out && expected_len) memcpy(out, buf + 1, expected_len);
                 return true;
             } else if (tail == TAIL_ERR) {
-                log_hex("RX (ERR)", buf, n);
+                set_link_state(NFC_LINK_NORMAL);
                 return false;
             } else {
-                log_hex("RX (resync, bad tail)", buf, n);
+                note_abnormal(buf, n);
                 memmove(buf, buf + 1, --n);
             }
         }
     }
-    if (n > 0) log_hex("RX (timeout, partial)", buf, n);
-    else ESP_LOGI(TAG, "RX (timeout, 0 bytes)");
+    set_link_state(NFC_LINK_ERROR);
     return false;
 }
 
@@ -156,12 +205,9 @@ void nfc_reader_init(void)
     // Distinct from the framed CMD_ANT_ON (which also happens to be 0x01).
     uint8_t enter_normal = 0x01;
     uart_write_bytes(NFC_UART_PORT, (const char *)&enter_normal, 1);
-    log_hex("TX", &enter_normal, 1);
     vTaskDelay(pdMS_TO_TICKS(50));
     uint8_t reply = 0;
     int got_bytes = uart_read_bytes(NFC_UART_PORT, &reply, 1, pdMS_TO_TICKS(50));
-    if (got_bytes == 1) log_hex("RX", &reply, 1);
-    else ESP_LOGI(TAG, "RX (timeout, 0 bytes)");
     bool got_aa = (got_bytes == 1 && reply == 0xAA);
     ESP_LOGI(TAG, "enter-normal-mode: %s", got_aa ? "ACK (0xAA)" : "no/other reply, trying reset");
     flush_rx();
@@ -175,6 +221,10 @@ void nfc_reader_init(void)
     send_packet(CMD_ANT_ON, NULL, 0);
     bool ant_ok = recv_packet(NULL, 0, 200);
     ESP_LOGI(TAG, "antenna on: %s", ant_ok ? "ok" : "no reply");
+    // Healthy means the link answered at all, not specifically "ant_ok":
+    // see reassert_antenna_if_due() for why a well-formed TAIL_ERR isn't
+    // a health problem.
+    s_healthy = (s_link_state == NFC_LINK_NORMAL);
 }
 
 static bool select_uid(const uint8_t *uid)
@@ -330,7 +380,16 @@ static void reassert_antenna_if_due(void)
     if (s_last_ms != 0 && now - s_last_ms < ANTENNA_REASSERT_INTERVAL_MS) return;
     s_last_ms = now;
     send_packet(CMD_ANT_ON, NULL, 0);
-    recv_packet(NULL, 0, 200);   // self-healing keep-alive — result doesn't change anything here
+    recv_packet(NULL, 0, 200);
+    // s_healthy tracks whether the link is responding at all (any
+    // well-formed reply, logged as NFC_LINK_NORMAL) — not recv_packet's
+    // OK-vs-ERR return value. A TAIL_ERR reply to "turn antenna on" (e.g.
+    // because it's already on) is a well-formed answer, not a sign of an
+    // unhealthy link; using the raw return value here previously flipped
+    // nfc_reader_is_healthy() to false on exactly that kind of harmless
+    // NAK, reverting the UI from Ready to WifiSpeaker every reassert
+    // interval even though the reader was working fine.
+    s_healthy = (s_link_state == NFC_LINK_NORMAL);
 }
 
 nfc_tap_result_t nfc_reader_poll(char *uri_out, size_t uri_out_sz)
@@ -341,14 +400,18 @@ nfc_tap_result_t nfc_reader_poll(char *uri_out, size_t uri_out_sz)
     send_packet(CMD_REQUEST, &req_mode, 1);
     uint8_t tag_type[2];
     if (!recv_packet(tag_type, sizeof(tag_type), 150)) {
-        // No card right now — also clears the de-dupe latch below, so the
-        // *same* tag can trigger again next time it's presented (without
-        // this, a second tap of the one tag we've been testing with would
-        // silently be swallowed as "nothing new" forever after the first
-        // successful read).
-        s_last_uid_hex[0] = '\0';
+        // No card right now — once confirmed by a few consecutive misses
+        // (not just one), clears the de-dupe latch below, so the *same*
+        // tag can trigger again next time it's genuinely presented
+        // (without this, a second tap of the one tag we've been testing
+        // with would silently be swallowed as "nothing new" forever after
+        // the first successful read).
+        if (++s_absence_misses >= UID_ABSENCE_CONFIRM_MISSES) {
+            s_last_uid_hex[0] = '\0';
+        }
         return NFC_TAP_NONE;
     }
+    s_absence_misses = 0;   // card answered a REQUEST — definitely still present
 
     send_packet(CMD_ANTICOLL, NULL, 0);
     uint8_t uid[4];
@@ -404,4 +467,9 @@ nfc_tap_result_t nfc_reader_poll(char *uri_out, size_t uri_out_sz)
     recv_packet(NULL, 0, 100);
 
     return result;
+}
+
+bool nfc_reader_is_healthy(void)
+{
+    return s_healthy;
 }
