@@ -16,6 +16,7 @@
 #include "assets/wifi_jpg.h"
 #include "assets/wifispeaker_jpg.h"
 #include "assets/ready_jpg.h"
+#include "assets/setup_jpg.h"
 
 static const char *TAG = "ui_assets";
 
@@ -25,7 +26,7 @@ static const char *TAG = "ui_assets";
 
 static uint8_t s_tjpgd_pool[ASSET_TJPGD_POOL_BYTES] __attribute__((aligned(4)));
 
-static lv_img_dsc_t s_boot_dsc, s_wifi_dsc, s_wifispeaker_dsc, s_ready_dsc;
+static lv_img_dsc_t s_boot_dsc, s_wifi_dsc, s_wifispeaker_dsc, s_ready_dsc, s_setup_dsc;
 
 typedef struct {
     const uint8_t *data; size_t len, pos;
@@ -106,6 +107,7 @@ void ui_assets_init(void)
     decode_asset("wifi",        wifi_jpg_data,        wifi_jpg_len,        &s_wifi_dsc);
     decode_asset("wifispeaker", wifispeaker_jpg_data, wifispeaker_jpg_len, &s_wifispeaker_dsc);
     decode_asset("ready",       ready_jpg_data,       ready_jpg_len,       &s_ready_dsc);
+    decode_asset("setup",       setup_jpg_data,       setup_jpg_len,       &s_setup_dsc);
     ESP_LOGI(TAG, "init OK");
 }
 
@@ -113,3 +115,4 @@ const lv_img_dsc_t *ui_asset_boot(void)        { return &s_boot_dsc; }
 const lv_img_dsc_t *ui_asset_wifi(void)        { return &s_wifi_dsc; }
 const lv_img_dsc_t *ui_asset_wifispeaker(void) { return &s_wifispeaker_dsc; }
 const lv_img_dsc_t *ui_asset_ready(void)       { return &s_ready_dsc; }
+const lv_img_dsc_t *ui_asset_setup(void)       { return &s_setup_dsc; }

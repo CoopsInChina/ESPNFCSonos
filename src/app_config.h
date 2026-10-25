@@ -8,7 +8,7 @@
 // ============================================================
 
 #ifndef FIRMWARE_VERSION
-#define FIRMWARE_VERSION "1.1"
+#define FIRMWARE_VERSION "1.2"
 #endif
 
 // ---- Display ----
@@ -103,4 +103,33 @@
 // ---- NVS ----
 #define NVS_NAMESPACE        "album_nfc"
 #define NVS_KEY_SPEAKER_IP   "spkr_ip"
-#define NVS_KEY_SPEAKER_NAME "spkr_name"
+#define NVS_KEY_SPEAKER_NAME "spkr_name"   // set by the setup wizard, see sonos_controller.c
+#define NVS_KEY_WIFI_SSID    "wifi_ssid"
+#define NVS_KEY_WIFI_PASS    "wifi_pass"
+#define NVS_KEY_FORCE_SETUP  "force_setup"   // set by the IMU re-entry gesture, see wifi_manager.c
+
+// ---- IMU setup re-entry gesture (imu.c, main.c) ----
+// Confirmed on real hardware: holding the device vertical, rotated 180
+// degrees from its natural orientation, reads approximately
+// ax=-0.96g, ay=-0.07g, az=+0.09g — a pose nothing hits by accident
+// (flat or correctly-vertical-in-a-stand are the only natural resting
+// states, and both read very differently: flat puts gravity on Z, and
+// right-way-up vertical reads ax with the opposite sign).
+#define IMU_TRIGGER_AX_MAX       -0.80f   // ax must be below (more negative than) this
+#define IMU_TRIGGER_LATERAL_MAX   0.40f   // |ay| and |az| must both stay below this
+#define IMU_TRIGGER_HOLD_MS       3000    // sustained hold before triggering — avoids a momentary tilt while picking the device up
+#define IMU_POLL_INTERVAL_MS      300
+
+// ---- WiFi setup (captive portal, see wifi_manager.c / setup_portal.c) ----
+// Runs only when no WiFi credentials are saved in NVS yet (factory-fresh,
+// or after a factory reset) — build-time wifi_creds.h is no longer used
+// for normal operation, only read as a one-time seed if present and NVS
+// is still empty (keeps this project's own dev-flashing workflow working
+// without forcing every rebuild through the wizard).
+#define WIFI_AP_SSID         "Jukebox Jam Setup"
+#define WIFI_AP_CHANNEL      1
+#define WIFI_AP_MAX_CONN     4
+// ESP-IDF's default SoftAP IP (192.168.4.1) — not explicitly configured,
+// documented here since setup_portal.c's DNS hijack and the QR code's
+// embedded URL both need to agree with it.
+#define WIFI_AP_IP           "192.168.4.1"

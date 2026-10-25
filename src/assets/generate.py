@@ -24,6 +24,7 @@ ASSETS = [
     ("wifi.jpg",        "wifi_jpg",        "wifi_jpg"),
     ("wifispeaker.jpg", "wifispeaker_jpg", "wifispeaker_jpg"),
     ("ready.jpg",       "ready_jpg",       "ready_jpg"),
+    ("setup.jpg",       "setup_jpg",       "setup_jpg"),
     ("nfc_tap.wav",     "nfc_tap_wav",     "nfc_tap_wav"),
 ]
 

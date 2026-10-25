@@ -36,6 +36,18 @@ CONFIG_LV_FONT_MONTSERRAT_48=y
 # album art is downloading after a good NFC tap (main.c).
 CONFIG_LV_USE_SPINNER=y
 
+# QR code widget — the setup wizard's "scan to join" code on the Setup
+# screen (main.c, setup_portal.c).
+CONFIG_LV_USE_QRCODE=y
+
+# esp_http_server's default 512-byte header budget is too tight for a
+# real phone browser's captive-portal request — modern mobile Safari/
+# Chrome send a full set of Accept/Accept-Language/Sec-Fetch-*/User-Agent
+# headers that routinely add up past that, rejected outright as
+# "431 Request Header Fields Too Large" (setup_portal.c).
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_HTTPD_MAX_URI_LEN=1024
+
 # Must match album_art.c's RGB565 buffers (uint16_t pixels).
 CONFIG_LV_COLOR_DEPTH_16=y
 

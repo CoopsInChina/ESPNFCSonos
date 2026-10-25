@@ -31,8 +31,9 @@ typedef struct {
 void sonos_controller_init(void);
 
 // Discover Sonos speakers via SSDP. Blocks up to timeout_ms.
-// Prefers SONOS_TARGET_SPEAKER_NAME (wifi_creds.h) if found among results.
-// Returns true if at least one speaker was found.
+// Prefers the NVS-saved speaker name (set by the setup wizard, see
+// sonos_controller_select_speaker()) if found among results, else the
+// first one found. Returns true if at least one speaker was found.
 bool sonos_controller_discover(uint32_t timeout_ms);
 
 // Start the background track-polling task (call after a successful discover).
@@ -57,3 +58,22 @@ bool sonos_play_spotify_uri(const char *uri);
 // verification SOAP calls above, which previously caused successful taps
 // to be misreported as failed.
 bool sonos_is_cmd_pending(void);
+
+// ---- Setup wizard support ------------------------------------------------
+
+typedef struct {
+    char name[64];
+    char ip[24];
+} sonos_speaker_info_t;
+
+// Lists the speakers found by the most recent sonos_controller_discover()
+// call, for a setup-wizard picker. *default_idx (if non-NULL) is set to
+// the index discover() itself would have preferred, so the UI can
+// pre-select it rather than defaulting to index 0.
+int sonos_controller_list_speakers(sonos_speaker_info_t *out, int out_max, int *default_idx);
+
+// Explicitly selects a speaker by name from the last discover() call
+// (used once the setup wizard's user confirms their choice) and persists
+// it to NVS as the preferred speaker for future boots. False if no
+// speaker by that name was in the last discover() results.
+bool sonos_controller_select_speaker(const char *name);

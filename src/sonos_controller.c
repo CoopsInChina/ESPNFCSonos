@@ -9,12 +9,12 @@
 #include "sonos_controller.h"
 #include "globals.h"
 #include "app_config.h"
-#include "wifi_creds.h"   // SONOS_TARGET_SPEAKER_NAME
 
 #include "esp_http_client.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_attr.h"
+#include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -343,18 +343,65 @@ bool sonos_controller_discover(uint32_t timeout_ms)
         ESP_LOGI(TAG, "  [%d] %s (%s) %s", i, s_speakers[i].name, s_speakers[i].ip, s_speakers[i].uuid);
     }
 
-    // Prefer SONOS_TARGET_SPEAKER_NAME (wifi_creds.h); fall back to the first found.
+    // Prefer whatever speaker name the setup wizard saved to NVS; fall
+    // back to the first one found (e.g. nothing saved yet, or it's no
+    // longer in range).
     s_active_idx = 0;
-    for (int i = 0; i < s_speaker_count; i++) {
-        if (strcasecmp(s_speakers[i].name, SONOS_TARGET_SPEAKER_NAME) == 0) {
-            s_active_idx = i;
-            break;
+    char preferred[64] = {0};
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = sizeof(preferred);
+        nvs_get_str(nvs, NVS_KEY_SPEAKER_NAME, preferred, &len);
+        nvs_close(nvs);
+    }
+    if (preferred[0]) {
+        for (int i = 0; i < s_speaker_count; i++) {
+            if (strcasecmp(s_speakers[i].name, preferred) == 0) {
+                s_active_idx = i;
+                break;
+            }
         }
     }
 
     s_speakers[s_active_idx].connected = true;
     ESP_LOGI(TAG, "Active speaker: %s (%s)", s_speakers[s_active_idx].name, s_speakers[s_active_idx].ip);
     return true;
+}
+
+// ---- Setup wizard support ------------------------------------------------
+
+int sonos_controller_list_speakers(sonos_speaker_info_t *out, int out_max, int *default_idx)
+{
+    int n = s_speaker_count < out_max ? s_speaker_count : out_max;
+    for (int i = 0; i < n; i++) {
+        strncpy(out[i].name, s_speakers[i].name, sizeof(out[i].name) - 1);
+        out[i].name[sizeof(out[i].name) - 1] = '\0';
+        strncpy(out[i].ip, s_speakers[i].ip, sizeof(out[i].ip) - 1);
+        out[i].ip[sizeof(out[i].ip) - 1] = '\0';
+    }
+    if (default_idx) *default_idx = (s_active_idx >= 0 && s_active_idx < n) ? s_active_idx : 0;
+    return n;
+}
+
+bool sonos_controller_select_speaker(const char *name)
+{
+    for (int i = 0; i < s_speaker_count; i++) {
+        if (strcasecmp(s_speakers[i].name, name) == 0) {
+            if (s_active_idx >= 0) s_speakers[s_active_idx].connected = false;
+            s_active_idx = i;
+            s_speakers[i].connected = true;
+
+            nvs_handle_t nvs;
+            if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+                nvs_set_str(nvs, NVS_KEY_SPEAKER_NAME, name);
+                nvs_commit(nvs);
+                nvs_close(nvs);
+            }
+            ESP_LOGI(TAG, "Selected speaker: %s (%s)", s_speakers[i].name, s_speakers[i].ip);
+            return true;
+        }
+    }
+    return false;
 }
 
 // ---- Track polling ------------------------------------------------------
