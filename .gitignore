@@ -5,8 +5,18 @@ sdkconfig.old
 sdkconfig.*
 !sdkconfig.defaults
 managed_components/
-dependencies.lock
 .DS_Store
+
+# Deliberately tracked, not ignored: pins exact resolved component
+# versions (including transitive deps like espressif/cmake_utilities)
+# so a fresh CI checkout resolves the same known-working versions
+# instead of re-querying the registry for "latest matching" and
+# potentially hitting a newly-published component manifest with syntax
+# PlatformIO's bundled idf-component-manager can't parse (confirmed the
+# hard way in CI — see src/idf_component.yml's esp_lcd_st77916 comment
+# for the same underlying parser limitation hitting a different
+# dependency the first time).
+# dependencies.lock
 
 # build-time secrets — don't commit your real WiFi credentials
 src/wifi_creds.h
