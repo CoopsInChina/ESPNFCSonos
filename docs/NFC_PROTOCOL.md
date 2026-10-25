@@ -144,3 +144,25 @@ See `read_ndef_text()` in `src/nfc_reader.c`.
   comment at the top of `nfc_reader_poll()`.
 - **HALT ordering**, as above — halt only after you're done with the card
   for this tap, never before reading it.
+- **`ANT_ON` (and the reset/enter-normal-mode handshake) run exactly once,
+  at boot, in `nfc_reader_init()`.** A transient wiring glitch during
+  that specific boot-time window can leave the module fully reachable —
+  `REQUEST` still gets a clean, deterministic reply every poll — with its
+  antenna never actually turned on, so it senses nothing until a full
+  power-cycle re-runs init. This looks identical to "the module just
+  doesn't see tags" from the log alone; the tell is that comms otherwise
+  look completely healthy. Confirmed on real hardware (a flaky ground
+  connection specifically), not just theorized. Fixed by periodically
+  re-asserting `ANT_ON` in `nfc_reader_poll()` (`reassert_antenna_if_due()`,
+  every `ANTENNA_REASSERT_INTERVAL_MS`) — idempotent and cheap, so a lost
+  boot-time init self-heals without a manual reboot.
+- **Ground matters, and more isn't always better.** A real failure mode
+  seen on this hardware: with the module's UART ground *not* connected to
+  the ESP32, taps produced real data mixed with garbage; connecting that
+  ground directly to the external 5V supply's ground *broke* comms
+  entirely (TX echoed back on RX, followed by noise) rather than fixing
+  it — the opposite of normal behavior. That pattern means the two
+  supplies don't share a clean common ground reference, not that the
+  wiring just needs a ground wire added. Measuring the DC voltage between
+  the two "grounds" (without bridging them) before doing any more direct
+  connecting is the safe way to quantify this.

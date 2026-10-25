@@ -58,6 +58,20 @@ static void flush_rx(void)
     while (uart_read_bytes(NFC_UART_PORT, tmp, sizeof(tmp), 0) > 0) { }
 }
 
+// DIAGNOSTIC: logs every byte sent/received — re-added after NFC stopped
+// working again (was working, then wasn't, with no code change in
+// between) to see exactly what's actually going out and coming back
+// rather than guess. Strip once resolved — see the earlier removal
+// commit for why (clogs the log otherwise).
+static void log_hex(const char *label, const uint8_t *data, size_t len)
+{
+    char hex[3 * 32];
+    size_t hpos = 0;
+    for (size_t i = 0; i < len && hpos + 3 < sizeof(hex); i++)
+        hpos += snprintf(hex + hpos, sizeof(hex) - hpos, "%02X ", data[i]);
+    ESP_LOGI(TAG, "%s (%u bytes): %s", label, (unsigned)len, hex);
+}
+
 static void send_packet(uint8_t cmd, const uint8_t *data, size_t len)
 {
     flush_rx();
@@ -68,6 +82,7 @@ static void send_packet(uint8_t cmd, const uint8_t *data, size_t len)
     if (data && len) { memcpy(pkt + n, data, len); n += len; }
     pkt[n++] = TAIL_OK;
     uart_write_bytes(NFC_UART_PORT, (const char *)pkt, n);
+    log_hex("TX", pkt, n);
 }
 
 // Reads a HEADER [data (expected_len bytes)] TAIL reply, resyncing on noise
@@ -88,6 +103,7 @@ static bool recv_packet(uint8_t *out, size_t expected_len, uint32_t timeout_ms)
 
         if (n >= total) {
             if (buf[0] != HEADER) {
+                log_hex("RX (resync, bad header)", buf, n);
                 memmove(buf, buf + 1, --n);
                 continue;
             }
@@ -96,20 +112,26 @@ static bool recv_packet(uint8_t *out, size_t expected_len, uint32_t timeout_ms)
             // Some firmwares echo the just-sent REQUEST frame before the
             // real reply — drop it and keep waiting.
             if (n == 4 && buf[1] == CMD_REQUEST && buf[2] == REQ_ALL && tail == TAIL_OK) {
+                log_hex("RX (dropped REQUEST echo)", buf, n);
                 n = 0;
                 continue;
             }
 
             if (tail == TAIL_OK) {
+                log_hex("RX (OK)", buf, n);
                 if (out && expected_len) memcpy(out, buf + 1, expected_len);
                 return true;
             } else if (tail == TAIL_ERR) {
+                log_hex("RX (ERR)", buf, n);
                 return false;
             } else {
+                log_hex("RX (resync, bad tail)", buf, n);
                 memmove(buf, buf + 1, --n);
             }
         }
     }
+    if (n > 0) log_hex("RX (timeout, partial)", buf, n);
+    else ESP_LOGI(TAG, "RX (timeout, 0 bytes)");
     return false;
 }
 
@@ -134,9 +156,14 @@ void nfc_reader_init(void)
     // Distinct from the framed CMD_ANT_ON (which also happens to be 0x01).
     uint8_t enter_normal = 0x01;
     uart_write_bytes(NFC_UART_PORT, (const char *)&enter_normal, 1);
+    log_hex("TX", &enter_normal, 1);
     vTaskDelay(pdMS_TO_TICKS(50));
     uint8_t reply = 0;
-    bool got_aa = (uart_read_bytes(NFC_UART_PORT, &reply, 1, pdMS_TO_TICKS(50)) == 1 && reply == 0xAA);
+    int got_bytes = uart_read_bytes(NFC_UART_PORT, &reply, 1, pdMS_TO_TICKS(50));
+    if (got_bytes == 1) log_hex("RX", &reply, 1);
+    else ESP_LOGI(TAG, "RX (timeout, 0 bytes)");
+    bool got_aa = (got_bytes == 1 && reply == 0xAA);
+    ESP_LOGI(TAG, "enter-normal-mode: %s", got_aa ? "ACK (0xAA)" : "no/other reply, trying reset");
     flush_rx();
 
     if (!got_aa) {
@@ -285,8 +312,31 @@ static bool read_ndef_text(const uint8_t *uid, char *text_out, size_t text_out_s
     return false;
 }
 
+// nfc_reader_init() sends ANT_ON exactly once, at boot. If that specific
+// exchange is lost to a transient wiring glitch during the boot window
+// (confirmed possible — a flaky connection at power-on can leave the
+// module fully reachable, answering REQUEST cleanly, with its antenna
+// never actually turned on, so it senses nothing until a full reboot
+// re-runs init), nothing afterward ever retries it. Re-assert
+// periodically instead — idempotent (a no-op if the antenna's already
+// on) and cheap, so a lost boot-time init can self-heal without a manual
+// power-cycle.
+#define ANTENNA_REASSERT_INTERVAL_MS 10000
+
+static void reassert_antenna_if_due(void)
+{
+    static uint32_t s_last_ms = 0;
+    uint32_t now = now_ms();
+    if (s_last_ms != 0 && now - s_last_ms < ANTENNA_REASSERT_INTERVAL_MS) return;
+    s_last_ms = now;
+    send_packet(CMD_ANT_ON, NULL, 0);
+    recv_packet(NULL, 0, 200);   // self-healing keep-alive — result doesn't change anything here
+}
+
 nfc_tap_result_t nfc_reader_poll(char *uri_out, size_t uri_out_sz)
 {
+    reassert_antenna_if_due();
+
     uint8_t req_mode = REQ_ALL;
     send_packet(CMD_REQUEST, &req_mode, 1);
     uint8_t tag_type[2];

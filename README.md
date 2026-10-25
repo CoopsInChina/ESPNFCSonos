@@ -47,7 +47,7 @@ board — no extra wiring needed for those.
 
 ## Status
 
-As of **V1.0**, confirmed working end-to-end on real hardware: boot →
+As of **V1.1**, confirmed working end-to-end on real hardware: boot →
 WiFi/speaker discovery → the full Boot/Wifi/Ready/Art UI cycle, live
 playback-state reacting (pause/resume, external track changes), NFC tag
 read, and NFC-triggered Spotify playback.
@@ -58,7 +58,7 @@ read, and NFC-triggered Spotify playback.
 | UI states (Boot/Wifi/Ready/Art, live-reactive) | Done — confirmed on hardware, including external track changes and pause/resume |
 | Sonos discovery, configurable target speaker | Done |
 | Fullscreen album art + loading spinner (inside the vinyl's label hole) | Done |
-| NFC tag read (UID + NDEF text) | Done — real UID detection and NDEF parsing confirmed on hardware |
+| NFC tag read (UID + NDEF text) | Done — real UID detection and NDEF parsing confirmed on hardware. Self-heals from a lost boot-time antenna-enable (see `docs/NFC_PROTOCOL.md`'s Gotchas) — confirm wiring/grounding first if taps stop registering despite otherwise-healthy comms |
 | NFC → Spotify playback on tap | Done — confirmed end-to-end on hardware, still via a **temporary hardcoded test URI** (see below); needs a real NDEF-written tag to fully retire that override |
 | Good-tap sound / bad-tap beep feedback | Done — confirmed on hardware; tap-sound volume has gone through several rounds of reduction and may still need another pass, and a distinct custom tone (rather than just a quieter version of the current clip) is wanted |
 | Live playback-state reacting (pause/resume switches Ready ↔ Art automatically) | Done — confirmed on hardware |
