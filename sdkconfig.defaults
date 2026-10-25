@@ -12,6 +12,12 @@
 # config-controlled at all).
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
+# Strips the compile timestamp (the only non-deterministic input for a
+# fixed commit + pinned toolchain) so a released binary can be verified
+# as genuinely built from the commit it claims — see the README's
+# "Verifying a release" section.
+CONFIG_APP_REPRODUCIBLE_BUILD=y
+
 # ESP32-S3R8 module: 16MB flash, 8MB Octal PSRAM.
 # Verified-working block, carried over as-is from the sibling Grill & Groove
 # project (/Users/ESP32MusicAndMeat) which runs the same ESP32-S3R8 chip.

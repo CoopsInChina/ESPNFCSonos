@@ -1,111 +1,41 @@
-# ESP NFC Sonos
+# Jukebox Jam
 
-A standalone ESP32-S3 device with a round display: shows the current
-Sonos/Spotify album art fullscreen, and plays a Spotify album/track/playlist
-when an NFC tag is tapped against it.
+<p align="center"><img src="docs/screenshots/Full Setup.jpg" alt="Jukebox Jam hardware" width="420"></p>
 
-This README has two parts:
+![Platform](https://img.shields.io/badge/platform-ESP32--S3-blue)
+![Framework](https://img.shields.io/badge/framework-ESP--IDF%205.3.1-blue)
+![UI](https://img.shields.io/badge/UI-LVGL%208.3-blue)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-- **[📖 User Guide](#-user-guide)** — setting the device up and using it
-  day to day. No code involved.
-- **[🛠 Developer Guide](#-developer-guide)** — hardware, architecture,
-  protocols, build/flash instructions, and everything under the hood.
+A standalone **NFC jukebox for Sonos**: tap a card, hear an album. Built on
+an ESP32-S3 with a round display that shows the current Sonos/Spotify
+album art fullscreen, and a captive-portal wizard for first-time setup —
+no app, no companion server, no touchscreen or buttons needed.
 
----
-
-# 📖 User Guide
-
-## First-time setup
-
-A factory-fresh device (or one that's been reset) boots straight into a
-**Setup** screen — the vinyl artwork with a live QR code in its box:
-
-<img src="Assets/Setup.png" width="220">
-
-1. **Scan the QR code** with your phone's camera. It joins the device's
-   own temporary WiFi network directly — no need to dig through your
-   phone's WiFi settings first.
-2. Your phone should automatically pop up a "Sign in to Jukebox Jam
-   Setup" page. If it doesn't, open a browser and go to `192.168.4.1`.
-3. Walk through the wizard:
-
-| Step | Screen |
-|---|---|
-| **1 · Scan for your WiFi network** | <img src="docs/screenshots/wizard-1-scan.jpg" width="220"><br><img src="docs/screenshots/wizard-2-networks.jpg" width="220"> |
-| **2 · Enter the password, Connect** | <img src="docs/screenshots/wizard-3-connect.jpg" width="220"> |
-| **3 · Pick your Sonos speaker** (the first one found is pre-selected) | <img src="docs/screenshots/wizard-4b-speaker.jpg" width="220"> |
-| **4 · Finish** | <img src="docs/screenshots/wizard-5-done.jpg" width="220"> |
-
-Once you tap **Finish**, the device saves everything and restarts —
-within a few seconds it'll be showing the Boot screen and connecting for
-real. There's no cancel button on the wizard by design: the device has no
-touchscreen or buttons, and there's nothing else useful it can do until
-WiFi is configured.
-
-## Everyday use
-
-**Tap a tag** against the device to play that album/track/playlist on
-your Sonos speaker. A good tap plays a short chime and the screen drops
-to a loading animation, then the album art once it loads. Two beeps
-means the tag was there but couldn't be read (or isn't a recognised
-tag).
-
-The screen always reflects what's actually going on:
-
-| Screen | Meaning |
-|---|---|
-| <img src="Assets/Boot.png" width="130"> | **Boot** — no WiFi connection |
-| <img src="Assets/Wifi.png" width="130"> | **Wifi** — WiFi connected, still looking for your Sonos speaker |
-| <img src="Assets/WifiSpeaker.png" width="130"> | **WifiSpeaker** — speaker found, NFC reader still starting up |
-| <img src="Assets/Ready.png" width="130"> | **Ready** — tap a card! |
-| *(fullscreen album art)* | **Art** — something's playing |
-
-Pausing or stopping whatever's playing switches straight back to
-**Ready**, and resuming switches back to the album art — the screen
-always tracks reality, not just whatever it decided at boot.
-
-**Idle dimming:** if the screen sits on Ready for 30 seconds with nothing
-happening, it dims gradually down to a low brightness floor over about
-4 seconds — this is normal, not a fault. Tapping a tag or anything else
-happening (playback starting, losing WiFi) brings it back to full
-brightness instantly.
-
-## Reconfiguring later
-
-To change the WiFi network or the selected Sonos speaker on a device
-that's already set up, **hold it vertical and upside-down** — rotated
-180° from however it would naturally stand — for about 3 seconds. This
-is a pose the device would never end up in by accident (it only ever
-sits flat or the right way up in a stand), so it's safe as a deliberate
-gesture even with no touchscreen or buttons to press.
-
-The device will restart straight into the Setup screen above — just
-walk through the wizard again.
-
-## Troubleshooting
-
-- **Nothing happens when I scan the QR code / I can't find the WiFi
-  network.** Make sure you're close enough to the device, and that your
-  phone's WiFi is actually on (the QR code only *joins* the network, your
-  phone's radio still needs to be enabled). If the captive-portal page
-  doesn't pop up automatically, open a browser and go to `192.168.4.1`
-  manually.
-- **The screen is dim.** That's the idle-dimming feature after 30s on the
-  Ready screen (see above) — not a fault. Tap a card and it'll come back
-  to full brightness.
-- **Tapping a tag does nothing.** Make sure the tag actually touches the
-  reader area and lift it fully off between taps (resting it on the
-  reader without lifting can look like "nothing happened" for a second
-  tap). Two beeps instead of silence means the tag was detected but
-  couldn't be read — it may not have the right data written to it.
-- **The device is stuck on the Boot screen.** It can't find your WiFi
-  network — check the network is in range and hasn't changed its
-  password. Use the "Reconfiguring later" gesture above to run the setup
-  wizard again with new details.
+> Firmware version: **1.2** · Status: **active development**
 
 ---
 
-# 🛠 Developer Guide
+[Screenshots](#screenshots) · [Hardware](#hardware) · [First Installation](#-first-installation) · [Using the device](#using-the-device) · [Setup wizard internals](#setup-wizard-internals) · [Releasing a new version](#releasing-a-new-version) · [Project layout](#project-layout) · [Known issues](#known-issues) · [Roadmap](#roadmap--to-do) · [License](#license) · [Credits](#credits)
+
+---
+
+## Screenshots
+
+<table>
+<tr>
+<td align="center"><img src="docs/screenshots/AlbumArt.png" width="180"><br>Now playing</td>
+<td align="center"><img src="Assets/Ready.png" width="180"><br>Ready — tap a card</td>
+<td align="center"><img src="Assets/Setup.png" width="180"><br>Setup — scan to configure</td>
+</tr>
+<tr>
+<td align="center"><img src="docs/screenshots/wizard-2-networks.jpg" width="180"><br>Setup wizard (phone)</td>
+<td align="center"><img src="docs/screenshots/wizard-4b-speaker.jpg" width="180"><br>Choose your speaker</td>
+<td align="center"><img src="docs/screenshots/wizard-5-done.jpg" width="180"><br>All set</td>
+</tr>
+</table>
+
+---
 
 ## Hardware
 
@@ -122,6 +52,13 @@ walk through the wizard again.
   swapping hardware.
 - **Speaker:** any Sonos speaker on the same network, with a linked Spotify
   account.
+
+<table>
+<tr>
+<td align="center"><img src="docs/screenshots/NFC Reader.jpg" width="220"><br>HW-033 NFC module</td>
+<td align="center"><img src="docs/screenshots/Power Board.jpg" width="220"><br>External 5V supply board</td>
+</tr>
+</table>
 
 ### Wiring
 
@@ -141,162 +78,148 @@ assignments live in [`src/board_config.h`](src/board_config.h).
 The display, I2C expander, I2S DAC, and IMU are all onboard the Waveshare
 board — no extra wiring needed for those.
 
-## Status
+---
 
-As of **V1.2**, confirmed working end-to-end on real hardware: the full
-WiFi + Sonos setup wizard (including the DNS/HTTP captive portal and a
-real phone joining and completing it), boot → WiFi/speaker discovery →
-the full Setup/Boot/Wifi/WifiSpeaker/Ready/Art UI cycle, live
-playback-state reacting (pause/resume, external track changes,
-NFC-tap-triggered plays), NFC tag read, NFC-triggered Spotify playback,
-idle screen dimming, and the IMU-based setup re-entry gesture.
+## 🎵 First Installation
 
-| Feature | Status |
-|---|---|
-| WiFi + Sonos speaker setup wizard (captive portal) | Done — confirmed end-to-end on real hardware, including a real phone joining the AP and completing the wizard. See "Setup wizard internals" below |
-| IMU-based setup re-entry gesture | Done — confirmed on real hardware. See "IMU setup re-entry" below |
-| UI states (Setup/Boot/Wifi/WifiSpeaker/Ready/Art, live-reactive) | Done — confirmed on hardware, including external track changes, pause/resume, and NFC-tap-triggered plays |
-| Sonos discovery, speaker selection | Done — via the setup wizard (NVS-persisted), not build-time config |
-| Fullscreen album art + loading spinner (inside the vinyl's label hole) | Done — see "Fixed bugs of note" below for several real races this went through |
-| NFC tag read (UID + NDEF text) | Done — real UID detection and NDEF parsing confirmed on hardware. Self-heals from a lost boot-time antenna-enable (see `docs/NFC_PROTOCOL.md`'s Gotchas) — confirm wiring/grounding first if taps stop registering despite otherwise-healthy comms |
-| NFC → Spotify playback on tap | Done — confirmed end-to-end on hardware, still via a **temporary hardcoded test URI** (see below); needs a real NDEF-written tag to fully retire that override |
-| Good-tap sound / bad-tap beep feedback | Done — confirmed on hardware; tap-sound volume has gone through several rounds of reduction and may still need another pass, and a distinct custom tone (rather than just a quieter version of the current clip) is wanted |
-| Live playback-state reacting (pause/resume switches Ready ↔ Art automatically) | Done — confirmed on hardware |
-| Idle screen dimming (Ready screen only) | Done — see "Idle dimming" in the User Guide |
-| Boot-screen version label | Done |
-| Album art download/scale speed | Was 10-50s, now ~2-3s typically — see `docs/NFC_PROTOCOL.md`'s note on the UART console conflict. Direct Spotify CDN links get resized to 300x300 before downloading (see `album_art.c`); art served through Sonos's `/getaa` proxy stays at 640x640 and is scaled locally — confirmed by direct testing that `/getaa` ignores every resize query param for Spotify content, so this isn't fixable from our side |
-| Sonos playback reliability | Several real failure modes found and fixed (see "Sonos playback reliability" below) by probing the speaker directly during testing — some intermittent failures during this round of testing may be regional network interference rather than a firmware issue, needs retesting in a different network environment |
+### 🎧 Want to just use it?
 
-### Known temporary hack
+No coding, no cables after the first flash.
 
-`src/nfc_reader.c`'s `nfc_reader_poll()` has a **hardcoded UID → Spotify URI
-override** for the one test tag used during development (a blank Mifare
-Classic card, UID `82BA2006`) — the only tag on hand while building this.
-Remove it once you have a tag actually written with NDEF text in the
-`service:type:id` format (see below), and confirm the real NDEF read path
-works against it.
+1. **Flash it.** Open **`https://coopsinchina.github.io/ESPNFCSonos/`** in
+   Chrome or Edge on a desktop/laptop (needs
+   [Web Serial](https://developer.chrome.com/docs/capabilities/serial), so
+   not available on mobile), plug the board in over USB-C, and click
+   **Install**. That's the whole install — bootloader, partition table, and
+   app go on in one step, no software to download.
+2. **Join it to your WiFi and pick a speaker.** On first boot the device has
+   no saved network, so it shows a **Setup** screen with a QR code:
 
-## Tag format
+   <img src="Assets/Setup.png" width="160">
 
-Tags are written with an NDEF Text record whose payload is a bare
-`"service:type:id"` string — same scheme as the ESP Sonos Controller
-project, e.g.:
+   Scan it with your phone's camera — it joins the device's own temporary
+   WiFi network directly, no digging through WiFi settings first. A
+   "Sign in to Jukebox Jam Setup" page should pop up automatically; if it
+   doesn't, open a browser and go to `192.168.4.1`. Then walk through the
+   wizard:
 
-```
-spotify:album:2dfTV7CktUEBkZCHiB7VQB
-spotify:track:4uLU6hMCjMI75M1A2tKUQC
-spotify:playlist:37i9dQZF1DXcBWIGoYBM5M
-```
+   | Step | Screen |
+   |---|---|
+   | **1 · Scan for your WiFi network** | <img src="docs/screenshots/wizard-1-scan.jpg" width="200"><br><img src="docs/screenshots/wizard-2-networks.jpg" width="200"> |
+   | **2 · Enter the password, Connect** | <img src="docs/screenshots/wizard-3-connect.jpg" width="200"> |
+   | **3 · Pick your Sonos speaker** (the first one found is pre-selected) | <img src="docs/screenshots/wizard-4b-speaker.jpg" width="200"> |
+   | **4 · Finish** | <img src="docs/screenshots/wizard-5-done.jpg" width="200"> |
 
-Only `spotify:` is supported — `sonos_controller.c`'s
-`build_spotify_uri_meta()` rejects anything else. Currently only **Mifare
-Classic 1K** tags (4-byte UID) are supported for reading; NTAG21x tags
-(7-byte UID) would need a different read path (the sibling PN532 project
-has one; this project doesn't yet — see Outstanding work below).
+   Tap **Finish** and the device saves everything and restarts — within a
+   few seconds it's showing the Boot screen and connecting for real.
+3. **Tap a tag.** A good tap plays a short chime and starts playback —
+   see [Using the device](#using-the-device) below.
 
-Writing tags is out of scope for this project — use the ESP Sonos
-Controller project or any NFC Tools app for that; this project only reads.
+**Reconfiguring later?** No need to re-flash — hold the device vertical and
+upside-down (rotated 180° from however it naturally stands) for about 3
+seconds, and it restarts straight back into the Setup screen above.
 
-## UI states & assets
+### 🛠️ Want to tinker?
+
+Building your own copy, changing the UI, or contributing back.
+
+**Stack:** ESP-IDF 5.3.1 via **PlatformIO** (`espressif32@6.9.0`), **LVGL
+8.3** for the UI. Sonos playback goes straight to the speaker over UPnP SOAP
+(`AddURIToQueue`/`SetAVTransportURI`) — no external server required.
+
+1. **Clone it:**
+   ```bash
+   git clone https://github.com/CoopsInChina/ESPNFCSonos.git
+   cd ESPNFCSonos
+   ```
+2. **Install VS Code + PlatformIO.** Get [VS Code](https://code.visualstudio.com/),
+   then install the **PlatformIO IDE** extension from the Extensions panel.
+   Open the cloned folder — PlatformIO reads `platformio.ini` and offers to
+   install the pinned `espressif32@6.9.0` toolchain automatically; accept it.
+3. **(Optional) Pre-seed WiFi credentials** to skip the wizard on a fresh
+   dev flash. Copy/create `src/wifi_creds.h` (gitignored — never commit
+   real credentials):
+   ```c
+   #pragma once
+   #define WIFI_SSID     "YourNetwork"
+   #define WIFI_PASSWORD "YourPassword"
+   ```
+   This is entirely optional — see [Setup wizard internals](#setup-wizard-internals)
+   for why. A real device without this file just goes straight to Setup.
+4. **Build & flash:**
+   ```bash
+   pio run -t upload -t monitor
+   ```
+   One thing worth knowing up front: PlatformIO generates
+   `sdkconfig.album_nfc` on your **first** build, seeded from
+   `sdkconfig.defaults` — it's local to your machine and git-ignored, so
+   you never create or commit it yourself. The gotcha: once an option
+   exists in that generated file, editing `sdkconfig.defaults` alone won't
+   change it on a machine that has already built — delete
+   `sdkconfig.album_nfc` to regenerate fresh from defaults.
+5. **Only if you're changing artwork or sounds** — the generated sources
+   below are already committed and built from as-is, so you don't need to
+   touch this unless you're editing their inputs:
+   ```bash
+   python3 src/assets/generate.py
+   ```
+   See [Asset pipeline](#asset-pipeline) below.
+
+---
+
+## Using the device
+
+**Tap a tag** against the device to play that album/track/playlist on your
+Sonos speaker. A good tap plays a short chime and the screen drops to a
+loading animation, then the album art once it loads. Two beeps means the
+tag was there but couldn't be read (or isn't a recognised tag).
 
 The screen is one of six states, re-evaluated continuously (not just
-decided once at boot) by `main.c`'s `nfc_loop_task` — see the User
-Guide's "Everyday use" for what each one looks like:
+decided once at boot) by `main.c`'s `nfc_loop_task`:
 
-| State | Shown when | Artwork |
+| State | Shown when | Preview |
 |---|---|---|
-| **Setup** | No WiFi credentials saved in NVS yet | Vinyl with a QR code in its label hole, `src/assets/setup.jpg` |
-| **Boot** | No WiFi | Plain vinyl record + firmware version (`V` + `FIRMWARE_VERSION` from `app_config.h`), `src/assets/boot.jpg` |
-| **Wifi** | WiFi connected, no Sonos speaker found | Vinyl with a WiFi icon, `src/assets/wifi.jpg` |
-| **WifiSpeaker** | WiFi + speaker found, NFC reader not yet confirmed working | Vinyl with an NFC icon (no "tap a card" text), `src/assets/wifispeaker.jpg` |
-| **Ready** | WiFi + speaker + NFC all confirmed, nothing actively playing (idle/paused/stopped) | Vinyl with an NFC icon + "TAP A CARD · PLAY AN ALBUM", `src/assets/ready.jpg` |
-| **Art** | WiFi + speaker found, actively playing | Fullscreen Sonos/Spotify album art |
+| **Setup** | No WiFi credentials saved yet | <img src="Assets/Setup.png" width="130"> |
+| **Boot** | No WiFi connection | <img src="Assets/Boot.png" width="130"> |
+| **Wifi** | WiFi connected, still looking for your Sonos speaker | <img src="Assets/Wifi.png" width="130"> |
+| **WifiSpeaker** | Speaker found, NFC reader still starting up | <img src="Assets/WifiSpeaker.png" width="130"> |
+| **Ready** | All systems ready — tap a card! | <img src="Assets/Ready.png" width="130"> |
+| **Art** | Something's playing | <img src="docs/screenshots/AlbumArt.png" width="130"> |
 
-`main.c`'s `boot_task()` walks Boot → Wifi → WifiSpeaker in order as each
-condition is actually met during boot (after the one-time Setup gate, if
-it ran), holding each one on screen for at least `BOOT_STEP_MIN_DISPLAY_MS`
-(`app_config.h`) — without that, a fast WiFi/Sonos connection could make
-the live state machine's first evaluation find every condition already
-true at once and jump straight to the final state, skipping the
-intermediate screens entirely (this genuinely happened before this was
-added).
+Pausing or stopping whatever's playing switches straight back to **Ready**,
+and resuming switches back to the album art — the screen always tracks
+reality, not just whatever it decided at boot. The NFC reader's health is
+also checked live, so **Ready** only ever invites a tap when the reader is
+actually confirmed working.
 
-Playback state is polled live from the speaker (AVTransport's
-`GetTransportInfo` → `CurrentTransportState`), so pausing/stopping a track
-switches back to **Ready** automatically, and resuming switches back to
-**Art** — not just a one-time decision at boot. The NFC reader's health
-(`nfc_reader_is_healthy()`) is also checked live, so Ready only ever
-invites a tap when the reader is actually confirmed working.
+**Idle dimming:** if the screen sits on **Ready** for `READY_DIM_IDLE_MS`
+(30s) with nothing happening, it dims gradually down to
+`READY_DIM_TARGET_PCT` over `READY_DIM_RAMP_MS` (4s) — normal, not a fault.
+Anything happening (a tap, playback starting, losing WiFi) snaps brightness
+back to 100% immediately.
 
-While new art is downloading/decoding, the **Boot** vinyl is shown with a
-small spinner inside its label hole (not a blank screen or stale art).
+**Reconfiguring later:** hold the device vertical, rotated 180° from its
+natural orientation, for `IMU_TRIGGER_HOLD_MS` (3s) — it restarts straight
+into the Setup wizard. See [IMU setup re-entry](#imu-setup-re-entry) for how.
 
-### Idle dimming
+### Troubleshooting
 
-Only while continuously on **Ready** (nothing playing, nothing actionable
-on screen): after `READY_DIM_IDLE_MS` with no state change, brightness
-ramps linearly from 100% down to `READY_DIM_TARGET_PCT` over
-`READY_DIM_RAMP_MS` (`app_config.h`). Any other state — a tap, playback
-starting, losing WiFi/the speaker — snaps brightness back to 100%
-immediately rather than ramping back up, so the screen is never still dim
-right when something actually happened. Implemented in `main.c`'s
-`nfc_loop_task`, driven by the existing PWM/LEDC backlight
-(`display_set_brightness()` in `display.c`).
+- **Nothing happens when I scan the QR code / I can't find the WiFi
+  network.** Make sure you're close enough to the device, and that your
+  phone's WiFi is actually on. If the captive-portal page doesn't pop up
+  automatically, open a browser and go to `192.168.4.1` manually.
+- **The screen is dim.** That's idle dimming (see above) — not a fault.
+  Tap a card and it comes back to full brightness.
+- **Tapping a tag does nothing.** Make sure the tag actually touches the
+  reader area and lift it fully off between taps. Two beeps instead of
+  silence means the tag was detected but couldn't be read.
+- **The device is stuck on the Boot screen.** It can't find your WiFi
+  network — check it's in range and the password hasn't changed. Use the
+  reconfiguring gesture above to run the setup wizard again.
 
-### Asset pipeline
-
-Source artwork lives in `Assets/` (the original ~1260×1264 PNGs — not used
-directly) and `src/assets/` (the processed files actually embedded in the
-firmware):
-
-- `boot.jpg` / `wifi.jpg` / `wifispeaker.jpg` / `ready.jpg` / `setup.jpg` —
-  each source PNG cropped to a centered square, resized to 360×360, and
-  saved as JPEG (quality 90). Decoded once at boot in `ui_assets.c` using
-  the same TJpgDec-based decoder as `album_art.c`.
-- `nfc_tap.wav` — converted from the provided `NfcTap.mp3` with macOS's
-  built-in `afconvert`, since this project has no MP3 decoder and doesn't
-  need one:
-
-  ```bash
-  afconvert -f WAVE -d LEI16@16000 -c 2 NfcTap.mp3 src/assets/nfc_tap.wav
-  ```
-
-  This matches `buzzer.c`'s I2S config exactly (16-bit, stereo, 16kHz), so
-  it streams straight to the DAC with no resampling. `buzzer.c` walks the
-  WAV's RIFF chunks to find the `data` chunk rather than assuming a fixed
-  44-byte header (`afconvert`'s output pads it further).
-
-All five images + the sound clip are embedded into the firmware as **plain
-generated C byte arrays** (`src/assets/boot_jpg.c`, `wifi_jpg.c`,
-`wifispeaker_jpg.c`, `ready_jpg.c`, `setup_jpg.c`, `nfc_tap_wav.c` +
-matching `.h` files), run through `src/assets/generate.py`:
-
-```bash
-python3 src/assets/generate.py
-```
-
-This is deliberately *not* `idf_component_register`'s `EMBED_FILES` —
-that mechanism generates mangled/doubled intermediate `.S`-file paths
-under PlatformIO's ESP-IDF integration (it assumes `idf.py`'s native
-directory layout), which fails the build outright. Plain C sources have
-no such issue and are picked up by `src/CMakeLists.txt`'s normal `*.c`
-glob like any other source file.
-
-**To replace any of these assets:** crop the replacement to a centered
-square and resize to 360×360 (matching the existing files in
-`src/assets/`), overwrite the matching raw file there, run
-`python3 src/assets/generate.py` to regenerate the C sources, then
-rebuild. No other code changes needed unless the dimensions or audio
-format change.
-
-`Assets/Speaker.png` is an unused leftover from an earlier draft (a
-"speaker found, no WiFi" state that turned out to be impossible, since
-finding a speaker requires WiFi first) — safe to delete.
+---
 
 ## Setup wizard internals
-
-See the User Guide's "First-time setup" for the user-facing walkthrough
-with screenshots. This section covers how it actually works.
 
 A factory-fresh device (or one with no WiFi credentials saved in NVS yet)
 boots straight into the **Setup** UI state: the vinyl artwork with a live
@@ -365,7 +288,6 @@ goes straight to Setup.
 
 ### IMU setup re-entry
 
-See the User Guide's "Reconfiguring later" for the user-facing gesture.
 Confirmed working on real hardware: holding the device vertical, rotated
 180° from its natural orientation, for `IMU_TRIGGER_HOLD_MS` restarts it
 straight into the Setup wizard above, even though real credentials are
@@ -394,39 +316,115 @@ positive, not negative). `imu_trigger_task` polls every
 normal connect attempt, forcing the same Setup path a factory-fresh
 device takes if it's set.
 
-## Getting started (building this project)
+---
 
-1. **(Optional, for this project's own dev workflow) Pre-seed WiFi
-   credentials.** Copy/create `src/wifi_creds.h` (gitignored — never
-   commit real credentials) to skip the wizard on a fresh flash — see
-   "Setup wizard internals" above for why this is optional, not required:
+## Tag format
 
-   ```c
-   #pragma once
-   #define WIFI_SSID     "YourNetwork"
-   #define WIFI_PASSWORD "YourPassword"
-   ```
+Tags are written with an NDEF Text record whose payload is a bare
+`"service:type:id"` string — same scheme as the ESP Sonos Controller
+project, e.g.:
 
-2. **Build & flash** (PlatformIO, ESP-IDF framework):
+```
+spotify:album:2dfTV7CktUEBkZCHiB7VQB
+spotify:track:4uLU6hMCjMI75M1A2tKUQC
+spotify:playlist:37i9dQZF1DXcBWIGoYBM5M
+```
 
-   ```bash
-   pio run -t upload
-   pio device monitor
-   ```
+Only `spotify:` is supported — `sonos_controller.c`'s
+`build_spotify_uri_meta()` rejects anything else. Currently only **Mifare
+Classic 1K** tags (4-byte UID) are supported for reading; NTAG21x tags
+(7-byte UID) would need a different read path (the sibling PN532 project
+has one; this project doesn't yet — see Roadmap below).
 
-   If you change `sdkconfig.defaults`, delete the generated
-   `sdkconfig.album_nfc` first — PlatformIO/ESP-IDF won't re-apply defaults
-   over an existing generated config:
+### Writing tags
 
-   ```bash
-   rm sdkconfig.album_nfc
-   pio run -t upload
-   ```
+This project only **reads** tags — writing is out of scope, but any
+Mifare Classic 1K tag written with a plain NDEF text record in the format
+above will work. Use any NFC writing app — e.g. **NFC Tools** on
+iOS/Android.
 
-3. **Tap a tag.** A good tap plays the NFC-tap chime and starts playback
-   (screen drops to the loading vinyl, then the album art once it's
-   decoded). Two buzzer beeps = tag present but unreadable/not a
-   recognised URI.
+**URI format:**
+
+| Content | URI format | Example |
+|---|---|---|
+| Spotify album | `spotify:album:<ID>` | `spotify:album:2dfTV7CktUEBkZCHiB7VQB` |
+| Spotify track | `spotify:track:<ID>` | `spotify:track:4uLU6hMCjMI75M1A2tKUQC` |
+| Spotify playlist | `spotify:playlist:<ID>` | `spotify:playlist:37i9dQZF1DXcBWIGoYBM5M` |
+
+**Finding the ID:** in Spotify, right-click an album, track, or playlist →
+Share → Copy Link. The ID is the last segment of the URL:
+
+```
+https://open.spotify.com/album/2dfTV7CktUEBkZCHiB7VQB
+                                ^^^^^^^^^^^^^^^^^^^^^^ this is the ID
+```
+
+**Writing the tag with NFC Tools (iOS/Android):**
+1. Open NFC Tools → Write → Add a record → Text
+2. Enter the URI (e.g. `spotify:album:2dfTV7CktUEBkZCHiB7VQB`)
+3. Tap **Write** and hold your tag to the phone
+
+**What happens when tapped:**
+1. Tag is read → NDEF text extracted
+2. The Sonos speaker's current queue is cleared
+3. The album/track/playlist is queued and playback starts on your chosen
+   speaker (see [First Installation](#-first-installation))
+
+`src/nfc_reader.c`'s `nfc_reader_poll()` currently has a **hardcoded UID →
+Spotify URI override** for the one test tag used during development (a
+blank Mifare Classic card, UID `82BA2006`) — remove it once you have a tag
+actually written with NDEF text in the format above, and confirm the real
+NDEF read path works against it.
+
+## Asset pipeline
+
+Source artwork lives in `Assets/` (the original ~1260×1264 PNGs — not used
+directly) and `src/assets/` (the processed files actually embedded in the
+firmware):
+
+- `boot.jpg` / `wifi.jpg` / `wifispeaker.jpg` / `ready.jpg` / `setup.jpg` —
+  each source PNG cropped to a centered square, resized to 360×360, and
+  saved as JPEG (quality 90). Decoded once at boot in `ui_assets.c` using
+  the same TJpgDec-based decoder as `album_art.c`.
+- `nfc_tap.wav` — converted from the provided `NfcTap.mp3` with macOS's
+  built-in `afconvert`, since this project has no MP3 decoder and doesn't
+  need one:
+
+  ```bash
+  afconvert -f WAVE -d LEI16@16000 -c 2 NfcTap.mp3 src/assets/nfc_tap.wav
+  ```
+
+  This matches `buzzer.c`'s I2S config exactly (16-bit, stereo, 16kHz), so
+  it streams straight to the DAC with no resampling. `buzzer.c` walks the
+  WAV's RIFF chunks to find the `data` chunk rather than assuming a fixed
+  44-byte header (`afconvert`'s output pads it further).
+
+All five images + the sound clip are embedded into the firmware as **plain
+generated C byte arrays** (`src/assets/boot_jpg.c`, `wifi_jpg.c`,
+`wifispeaker_jpg.c`, `ready_jpg.c`, `setup_jpg.c`, `nfc_tap_wav.c` +
+matching `.h` files), run through `src/assets/generate.py`:
+
+```bash
+python3 src/assets/generate.py
+```
+
+This is deliberately *not* `idf_component_register`'s `EMBED_FILES` —
+that mechanism generates mangled/doubled intermediate `.S`-file paths
+under PlatformIO's ESP-IDF integration (it assumes `idf.py`'s native
+directory layout), which fails the build outright. Plain C sources have
+no such issue and are picked up by `src/CMakeLists.txt`'s normal `*.c`
+glob like any other source file.
+
+**To replace any of these assets:** crop the replacement to a centered
+square and resize to 360×360 (matching the existing files in
+`src/assets/`), overwrite the matching raw file there, run
+`python3 src/assets/generate.py` to regenerate the C sources, then
+rebuild. No other code changes needed unless the dimensions or audio
+format change.
+
+`Assets/Speaker.png` is an unused leftover from an earlier draft (a
+"speaker found, no WiFi" state that turned out to be impossible, since
+finding a speaker requires WiFi first) — safe to delete.
 
 ## Configuration reference
 
@@ -445,28 +443,37 @@ All tunables live in [`src/app_config.h`](src/app_config.h):
 | `BEEP_FREQ_HZ`/`DURATION_MS`/`GAP_MS` | Synthesized bad-tap beep tone (good tap uses the `nfc_tap.wav` sound clip instead) |
 | `TAP_LOADING_TIMEOUT_MS` | Max time the loading screen rides out a tap-triggered play before falling back if nothing ever actually started |
 | `CMD_SETTLE_GRACE_MS` | How long after a tap-triggered play finishes setup to keep ignoring a stale "not playing" transport reading — see "Sonos playback reliability" |
-| `READY_DIM_IDLE_MS`/`RAMP_MS`/`TARGET_PCT` | Idle screen dimming on Ready — see "Idle dimming" above |
+| `READY_DIM_IDLE_MS`/`RAMP_MS`/`TARGET_PCT` | Idle screen dimming on Ready |
 | `WIFI_AP_SSID`/`CHANNEL`/`MAX_CONN`/`IP` | The setup wizard's temporary AP — see "Setup wizard internals" |
 | `IMU_TRIGGER_AX_MAX`/`LATERAL_MAX`/`HOLD_MS`, `IMU_POLL_INTERVAL_MS` | The setup re-entry gesture — see "IMU setup re-entry" |
 
 Hardware pins: [`src/board_config.h`](src/board_config.h).
 
-## Architecture
+## Project layout
 
-| File | Responsibility |
-|---|---|
-| `main.c` | Boot sequence (including the one-time Setup gate), the continuous Setup/Boot/Wifi/WifiSpeaker/Ready/Art UI state machine, the main NFC-tap loop, the IMU setup re-entry gesture |
-| `wifi_manager.c` | NVS-held STA credentials/connect, plus the setup AP (`WIFI_MODE_APSTA`), scanning and test-connect the wizard needs, the force-setup-on-next-boot flag |
-| `setup_portal.c` | The setup wizard itself: DNS captive-portal hijack, HTTP server, wizard HTML/JS, WiFi scan/connect + Sonos speaker detection endpoints |
-| `tca9554.c` | I2C IO expander — drives the LCD's real reset line |
-| `imu.c` | QMI8658 accelerometer, shared I2C bus — for the setup re-entry gesture (see "IMU setup re-entry") |
-| `display.c` | ST77916 QSPI panel init via `esp_lvgl_port` |
-| `ui_assets.c` | Decodes the embedded Setup/Boot/Wifi/WifiSpeaker/Ready vinyl JPEGs once at boot (see "UI states & assets") |
-| `album_art.c` | HTTP download, JPEG decode (TJpgDec), nearest-neighbor scale to the panel |
-| `nfc_reader.c` | HW-033 UART protocol, tag detection, NDEF text read |
-| `sonos_controller.c` | SSDP discovery, SOAP control, direct (server-free) Spotify playback, track + live transport-state polling, speaker list/selection for the setup wizard |
-| `buzzer.c` | I2S playback through the onboard DAC — the embedded NFC-tap sound clip for good taps, a synthesized tone for bad taps |
-| `globals.c` | Shared state: network mutex, inter-request cooldown timing |
+```
+src/
+  main.c                 boot sequence, Setup gate, UI state machine, NFC-tap loop, IMU re-entry gesture
+  wifi_manager.c          NVS-held STA credentials/connect, setup AP, scan, test-connect, force-setup flag
+  setup_portal.c          setup wizard: DNS captive-portal hijack, HTTP server, wizard page, Sonos detection
+  tca9554.c                I2C IO expander — drives the LCD's real reset line
+  imu.c                    QMI8658 accelerometer — setup re-entry gesture
+  display.c                ST77916 QSPI panel init via esp_lvgl_port
+  ui_assets.c               decodes the embedded Setup/Boot/Wifi/WifiSpeaker/Ready vinyl JPEGs
+  album_art.c               HTTP download, JPEG decode (TJpgDec), nearest-neighbor scale to the panel
+  nfc_reader.c               HW-033 UART protocol, tag detection, NDEF text read
+  sonos_controller.c         SSDP discovery, SOAP control, direct Spotify playback, track/transport polling
+  buzzer.c                   I2S playback — NFC-tap chime, synthesized bad-tap beep
+  globals.c                  shared state: network mutex, inter-request cooldown timing
+  assets/                    source images/audio + generate.py (see Asset pipeline)
+docs/
+  NFC_PROTOCOL.md            HW-033 reverse-engineered protocol notes
+  screenshots/                photos/screenshots used in this README
+Assets/                      original uncropped UI artwork (PNG)
+web/pages/index.html          GitHub Pages web-flash landing page (ESP Web Tools)
+.github/workflows/            release.yml — builds `release` pushes, publishes Pages
+partitions.csv                 16MB flash layout (single factory app, no OTA)
+```
 
 ## Sonos playback reliability
 
@@ -555,9 +562,9 @@ A few non-obvious races worth knowing about if they ever resurface:
   with a 3-consecutive-miss debounce before clearing the latch (see
   `docs/NFC_PROTOCOL.md`'s Gotchas).
 - **WiFi silently never reconnecting after the setup wizard.** See "Why a
-  reboot, not an in-place reconnect" under "Setup wizard internals" above.
+  reboot, not an in-place reconnect" under [Setup wizard internals](#setup-wizard-internals).
 
-## Dev troubleshooting
+### Dev troubleshooting
 
 - **Stale sdkconfig.** If `sdkconfig.defaults` changes don't seem to take
   effect, delete `sdkconfig.album_nfc` and rebuild — this is a recurring
@@ -574,7 +581,7 @@ A few non-obvious races worth knowing about if they ever resurface:
 - **`Source '....S' not found` during build, mentioning a jpg/wav file.**
   That's `idf_component_register`'s `EMBED_FILES` breaking under
   PlatformIO's ESP-IDF integration — don't use it for new assets here (see
-  "Asset pipeline" above). Use `src/assets/generate.py` instead.
+  [Asset pipeline](#asset-pipeline) above). Use `src/assets/generate.py` instead.
 - **Compile error about a missing `_xxx_data`/`_xxx_len` symbol.** If you
   add a new asset or rename one, update both `src/assets/generate.py`'s
   `ASSETS` list and the `#include "assets/<name>.h"` + call site in
@@ -592,7 +599,75 @@ A few non-obvious races worth knowing about if they ever resurface:
   headroom (4096 bytes minimum) for anything logging floats, not just
   what the log line itself looks like it needs.
 
-## Outstanding work
+---
+
+## Releasing a new version
+
+*This section is for maintainers cutting a build for distribution — if you
+just want a device running the latest release, see
+[Want to just use it?](#-want-to-just-use-it) instead.*
+
+**Only builds pushed to the `release` branch are ever published.** Merging
+`main` → `release` (or pushing directly) triggers
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which builds
+the firmware and publishes it to **GitHub Pages**:
+
+| What | Where |
+|---|---|
+| Browser-based USB flash (no software install — Chrome/Edge, Web Serial) | `https://coopsinchina.github.io/ESPNFCSonos/` |
+| The exact commit a published build came from | `.../version.json` |
+| The app image itself | `.../firmware.bin` |
+
+One-time repo setup: **Settings → Pages → Source → "GitHub Actions"**.
+
+**Bump the version** before releasing — it's the single source of truth read
+by both the firmware build and the release workflow:
+```c
+// src/app_config.h
+#define FIRMWARE_VERSION "X.Y.Z"
+```
+
+**Installing:** this project has no OTA/dual-slot partition layout
+(`partitions.csv` is a single factory app) — every install, first-time or
+update, is the same web-flash step above. Re-flashing does **not** erase
+your saved WiFi credentials or speaker choice (NVS lives in its own
+partition, untouched by the firmware image); use the
+[reconfiguring gesture](#using-the-device) if you want to change those.
+
+**Verifying a release** — confirm the binaries CI published are genuinely
+built from the commit `version.json` claims, not something stale or tampered:
+
+1. `version.json` on Pages carries the exact commit: `{"version":"X.Y.Z",
+   "file":"firmware.bin","commit":"<sha>"}`.
+2. `sha256sums.txt` (same folder) has the published SHA-256 of each binary.
+3. Builds are **reproducible** (`CONFIG_APP_REPRODUCIBLE_BUILD` — strips the
+   compile timestamp, the only non-deterministic input for a fixed commit +
+   pinned toolchain), so rebuilding that exact commit locally reproduces the
+   same bytes:
+   ```bash
+   git checkout <sha>          # the commit named in version.json
+   pio run -e album_nfc
+   shasum -a 256 .pio/build/album_nfc/firmware.bin
+   ```
+   Compare against the matching line in `sha256sums.txt`. A match confirms
+   CI built from that source with no tampering in between; a mismatch means
+   either the toolchain drifted from the pinned `espressif32@6.9.0` or the
+   published artifact doesn't match that commit.
+
+---
+
+## Known issues
+
+- **Intermittent Sonos playback failures** during some testing may be
+  regional network interference between the speaker and Spotify's servers
+  rather than a firmware bug — see
+  [Sonos playback reliability](#sonos-playback-reliability).
+- A card wobbling on removal right after a good tap can trigger a second,
+  confusing "bad tap" beep from a transient `anticoll` read failure — not
+  a comms bug, just a possible debounce worth adding if it's annoying in
+  practice.
+
+## Roadmap / to-do
 
 - The wizard page approximates Montserrat with a system-font fallback +
   letter-spacing rather than the real font, since a phone on the
@@ -609,11 +684,23 @@ A few non-obvious races worth knowing about if they ever resurface:
 - Spotify `track`/`playlist` URI types are implemented but only `album` has
   been exercised end-to-end so far.
 - Delete `Assets/Speaker.png` (confirmed unused).
-- Retest Sonos playback reliability outside of networks that may
-  interfere with Sonos/Spotify traffic (see "Sonos playback reliability"
-  above) before treating any further intermittent failures as firmware
-  bugs.
-- Minor: a card wobbling on removal right after a good tap can trigger a
-  second, confusing "bad tap" beep from a transient `anticoll` read
-  failure — not a comms bug, just a possible debounce worth adding in
-  `nfc_reader.c`/`main.c` if it's annoying in practice.
+- General testing and defect fixing across all features.
+
+---
+
+## License
+
+[MIT](LICENSE) — covers the code in this repository. It does **not**
+cover the original UI artwork or photos in `Assets/`/`docs/screenshots/`.
+
+## Credits
+
+- Built on an ESP32-S3 round-display platform, ESP-IDF, and LVGL.
+- Spin-off of two sibling projects:
+  - **ESP Sonos Controller** — the original NFC-tag-triggers-Sonos-Spotify-playback
+    project, built around a PN532 reader. This project reuses its tag text
+    format and Mifare Classic NDEF reading scheme.
+  - **[Groove & Grill](https://github.com/CoopsInChina/GrooveAndGrill)** — the
+    ESP32-S3 + round display + album art rendering pipeline this project's
+    display/JPEG/LVGL code is ported from, and the source of several
+    captive-portal fixes reused in the setup wizard.
