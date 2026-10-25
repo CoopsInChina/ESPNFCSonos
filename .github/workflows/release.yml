@@ -30,18 +30,7 @@ jobs:
         run: pip install --upgrade platformio
 
       - name: Build firmware
-        # IDF_COMPONENT_MANAGER=0: managed_components/ is committed
-        # (fully resolved already — see .gitignore's comment), but the
-        # component manager still tries to re-verify dependency versions
-        # against the live registry on every build regardless of what's
-        # already present locally, and that re-check hit a newly-
-        # published component manifest with "if:" syntax PlatformIO's
-        # bundled idf-component-manager can't parse (confirmed failing
-        # in CI even with the exact resolved trees already committed).
-        # Disabling it outright skips that check entirely and just
-        # builds from the already-resolved managed_components/ as plain
-        # extra component directories.
-        run: IDF_COMPONENT_MANAGER=0 pio run -e album_nfc
+        run: pio run -e album_nfc
 
       - name: Read firmware version
         id: version
