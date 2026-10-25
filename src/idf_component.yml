@@ -20,3 +20,15 @@ dependencies:
   # ParseException before any of our own code is even touched. 1.0.1 covers
   # plain SPI/QSPI (what we need) without that newer manifest syntax.
   espressif/esp_lcd_st77916: "~1.0.1"
+
+  # esp_lcd_st77916's own transitive dependency — pinned here too,
+  # exactly matching the version dependencies.lock already resolved
+  # (0.5.3). An explicit exact pin means the solver doesn't need to
+  # enumerate every other version matching cmake_utilities' own range to
+  # check compatibility — confirmed necessary in CI: even with
+  # dependencies.lock present, the solver still fetched the full version
+  # list from the registry to validate it, and a *different* (newer,
+  # unused) cmake_utilities release's manifest hit the exact same
+  # pyparsing "if:"-clause parse failure described above for
+  # esp_lcd_st77916's 2.0.2.
+  espressif/cmake_utilities: "0.5.3"
