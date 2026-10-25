@@ -4,19 +4,23 @@ sdkconfig
 sdkconfig.old
 sdkconfig.*
 !sdkconfig.defaults
-managed_components/
 .DS_Store
 
-# Deliberately tracked, not ignored: pins exact resolved component
-# versions (including transitive deps like espressif/cmake_utilities)
-# so a fresh CI checkout resolves the same known-working versions
-# instead of re-querying the registry for "latest matching" and
-# potentially hitting a newly-published component manifest with syntax
-# PlatformIO's bundled idf-component-manager can't parse (confirmed the
-# hard way in CI — see src/idf_component.yml's esp_lcd_st77916 comment
-# for the same underlying parser limitation hitting a different
-# dependency the first time).
+# Deliberately tracked, not ignored: dependencies.lock pins exact
+# resolved component versions, and managed_components/ is the actual
+# resolved source trees — both committed so a fresh CI checkout never
+# needs to query the component registry at all. A lock file alone
+# wasn't enough: the component manager still re-queries the registry
+# for "latest matching" versions to validate the lock even when one is
+# present, and that re-query hit a newly-published component manifest
+# with "if:" syntax PlatformIO's bundled idf-component-manager can't
+# parse — confirmed failing in CI with the lock file alone (the same
+# underlying parser limitation already documented in
+# src/idf_component.yml's esp_lcd_st77916 comment, just surfacing on a
+# different dependency). Committing the resolved trees directly removes
+# the network dependency entirely.
 # dependencies.lock
+# managed_components/
 
 # build-time secrets — don't commit your real WiFi credentials
 src/wifi_creds.h
