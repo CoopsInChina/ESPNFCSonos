@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jukebox Jam — Install</title>
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js"></script>
+<style>
+  :root{--bg:#E4E1D0;--ink:#363531}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+       background:var(--bg);color:var(--ink);
+       max-width:520px;margin:0 auto;padding:32px 16px;text-align:center;
+       letter-spacing:.02em}
+  h1{text-transform:uppercase;letter-spacing:.12em;margin:0 0 4px}
+  h2{color:#6b6a63;font-size:.9rem;font-weight:normal;letter-spacing:.06em;margin:0 0 28px}
+  .card{background:rgba(255,255,255,.35);border:1.5px solid rgba(54,53,49,.18);
+        border-radius:12px;padding:24px;margin:16px 0}
+  .steps{text-align:left;color:#4a4943;font-size:.9rem;line-height:1.6}
+  .steps li{margin-bottom:6px}
+  #version{color:#8a8880;font-size:.8rem;margin-top:24px}
+  esp-web-install-button{--esp-tools-button-color:#363531}
+  .browser-note{color:#8a8880;font-size:.8rem;margin-top:14px}
+</style>
+</head>
+<body>
+  <h1>Jukebox Jam</h1>
+  <h2>Install firmware over USB — no software required</h2>
+
+  <div class="card">
+    <ol class="steps">
+      <li>Plug the device into this computer via USB-C.</li>
+      <li>Click the button below and pick the device's serial port.</li>
+      <li>Wait for the flash to finish, then the device reboots on its own
+          straight into the Setup wizard.</li>
+    </ol>
+    <p style="margin-top:20px">
+      <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
+    </p>
+    <p class="browser-note">Needs Chrome or Edge (Web Serial support). Firefox and Safari aren't supported.</p>
+  </div>
+
+  <p>After flashing, see the
+     <a href="https://github.com/CoopsInChina/ESPNFCSonos#-first-installation">First Installation</a>
+     guide for joining it to your WiFi and Sonos speaker.</p>
+
+  <p id="version">Loading current release version&hellip;</p>
+  <script>
+    fetch('version.json').then(r => r.json()).then(d => {
+      document.getElementById('version').textContent = 'Latest release: v' + d.version;
+    }).catch(() => {});
+  </script>
+</body>
+</html>
