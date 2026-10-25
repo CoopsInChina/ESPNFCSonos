@@ -46,6 +46,12 @@ CONFIG_LV_USE_SPINNER=y
 # screen (main.c, setup_portal.c).
 CONFIG_LV_USE_QRCODE=y
 
+# LVGL builds its entire examples/ tree (100+ files covering every
+# widget) by default, none of which this project calls — a real chunk
+# of every clean build's time. Demos default to off already; this was
+# the one still on by default.
+CONFIG_LV_BUILD_EXAMPLES=n
+
 # esp_http_server's default 512-byte header budget is too tight for a
 # real phone browser's captive-portal request — modern mobile Safari/
 # Chrome send a full set of Accept/Accept-Language/Sec-Fetch-*/User-Agent

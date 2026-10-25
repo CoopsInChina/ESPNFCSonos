@@ -598,6 +598,24 @@ A few non-obvious races worth knowing about if they ever resurface:
   path (a well-known ESP-IDF/newlib gotcha) — size task stacks with real
   headroom (4096 bytes minimum) for anything logging floats, not just
   what the log line itself looks like it needs.
+- **The release workflow's CI build currently fails** on a fresh
+  checkout with a `pyparsing.exceptions.ParseException: ... found '$'`
+  deep in `idf_component_manager`'s dependency solver — the same class
+  of bug already documented above for `esp_lcd_st77916` (a component
+  manifest somewhere in the live registry uses "if:" syntax this
+  bundled parser version can't handle), just hitting a different,
+  indirectly-touched dependency this time. Pinning `dependencies.lock`,
+  committing `managed_components/` directly, and disabling the
+  component manager outright (`IDF_COMPONENT_MANAGER=0` +
+  `EXTRA_COMPONENT_DIRS`) were all tried — none fully fixed it yet (the
+  solver still re-queries the registry even with a lock present, and
+  disabling the manager breaks PlatformIO's own main-target detection).
+  The v1.2 web-flash build currently live on Pages was published
+  manually (built locally, where this exact setup builds reliably, then
+  pushed straight to a `gh-pages` branch) rather than via the workflow —
+  see the git history around "Manual publish: v1.2 web-flash build" if
+  you need to repeat that. Still needs a real fix for future releases to
+  go out through CI as intended.
 
 ---
 
